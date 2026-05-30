@@ -1,0 +1,83 @@
+const BASE = "/api/projects";
+
+export const api = {
+  async getProjects(): Promise<Array<{ id: string; name: string; createdAt: string }>> {
+    const res = await fetch(`${BASE}`);
+    return res.json();
+  },
+  async createProject(name: string): Promise<{ id: string; name: string; createdAt: string }> {
+    const res = await fetch(`${BASE}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    return res.json();
+  },
+  async deleteProject(id: string): Promise<void> {
+    await fetch(`${BASE}/${id}`, { method: "DELETE" });
+  },
+  async getSystemPrompt(projectId: string): Promise<{ prompt: string }> {
+    const res = await fetch(`${BASE}/${projectId}/system-prompt`);
+    return res.json();
+  },
+  async getUsage(projectId: string): Promise<{
+    totalCalls: number;
+    totalPromptTokens: number;
+    totalCompletionTokens: number;
+    totalCacheHitTokens: number;
+  }> {
+    const res = await fetch(`${BASE}/${projectId}/usage`);
+    return res.json();
+  },
+  async getHistory(projectId: string): Promise<Array<{
+    seq: number;
+    role: string;
+    content: string;
+    toolCalls: string;
+    toolCallId: string;
+    reasoningContent: string;
+    usageJson: string;
+  }>> {
+    const res = await fetch(`${BASE}/${projectId}/history`);
+    return res.json();
+  },
+  chat(
+    projectId: string,
+    message: string,
+    onEvent: (event: { type: string; data: unknown }) => void,
+  ): AbortController {
+    const ctrl = new AbortController();
+    fetch(`${BASE}/${projectId}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+      signal: ctrl.signal,
+    })
+      .then(async (res) => {
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop()!;
+          for (const part of parts) {
+            if (!part.trim()) continue;
+            const lines = part.split("\n");
+            let eventType = "message";
+            let data = "";
+            for (const line of lines) {
+              if (line.startsWith("event: ")) eventType = line.slice(7);
+              else if (line.startsWith("data: ")) data = line.slice(6);
+            }
+            onEvent({ type: eventType, data: JSON.parse(data) });
+          }
+        }
+      })
+      .catch(() => {});
+    return ctrl;
+  },
+};

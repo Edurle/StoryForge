@@ -1,0 +1,6 @@
+node_modules
+dist
+.pids
+data
+.env
+.env.json
