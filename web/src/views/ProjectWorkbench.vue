@@ -58,20 +58,24 @@
           </template>
         </div>
         <div class="input-area">
-          <select v-model="currentModel" class="chat-select" title="模型">
-            <option value="deepseek-v4-flash">Flash</option>
-            <option value="deepseek-v4-pro">Pro</option>
-          </select>
-          <select v-model="currentThinking" class="chat-select" title="思考模式">
-            <option value="enabled">思考</option>
-            <option value="disabled">不思考</option>
-          </select>
-          <select v-if="currentThinking === 'enabled'" v-model="currentEffort" class="chat-select" title="思考深度">
-            <option value="high">High</option>
-            <option value="max">Max</option>
-          </select>
-          <input v-model="input" placeholder="输入创作指令..." @keyup.enter="send" :disabled="sending" />
-          <button class="send-btn" @click="send" :disabled="sending">发送</button>
+          <textarea v-model="input" class="chat-input" rows="3" placeholder="输入创作指令..." @keydown.enter.exact="send" :disabled="sending" />
+          <div class="input-bar">
+            <div class="input-controls">
+              <select v-model="currentModel" class="chat-select" title="模型">
+                <option value="deepseek-v4-flash">Flash</option>
+                <option value="deepseek-v4-pro">Pro</option>
+              </select>
+              <select v-model="currentThinking" class="chat-select" title="思考模式">
+                <option value="enabled">思考</option>
+                <option value="disabled">不思考</option>
+              </select>
+              <select v-if="currentThinking === 'enabled'" v-model="currentEffort" class="chat-select" title="思考深度">
+                <option value="high">High</option>
+                <option value="max">Max</option>
+              </select>
+            </div>
+            <button class="send-btn" @click="send" :disabled="sending">发送</button>
+          </div>
         </div>
       </main>
       <aside v-show="!layout.rightCollapsed" class="right-panel">
@@ -594,30 +598,44 @@ header button:hover { background: #f3f4f6; color: #374151; }
 
 .input-area {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.7rem 0.8rem;
+  flex-direction: column;
   background: #fff;
   border-top: 1px solid #e5e7eb;
+  padding: 0;
 }
-.input-area input {
-  flex: 1;
-  padding: 0.5rem 0.8rem;
-  border: 1.5px solid #e5e7eb;
-  border-radius: 8px;
-  font-size: 0.85rem;
+.chat-input {
+  width: 100%;
+  border: none;
   outline: none;
-  transition: border-color 0.15s;
+  resize: none;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  font-family: inherit;
+  color: #1f2937;
+  box-sizing: border-box;
 }
-.input-area input:focus { border-color: #6366f1; }
+.chat-input::placeholder { color: #b0b8c4; }
+.chat-input:focus { background: #fafbfc; }
+.input-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.7rem 0.5rem;
+  border-top: 1px solid #f3f4f6;
+}
+.input-controls {
+  display: flex;
+  gap: 0.35rem;
+}
 .send-btn {
-  padding: 0.5rem 1rem;
+  padding: 0.35rem 1rem;
   background: #6366f1;
   color: #fff;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   cursor: pointer;
   transition: background 0.15s;
 }
