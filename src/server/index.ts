@@ -4,6 +4,7 @@ import type { Request, Response } from "express";
 import type { DbWorker } from "../db/worker.js";
 import type { StoryForgeLoop } from "../agent/loop.js";
 import type { UsageInfo } from "../agent/loop.js";
+import type { StreamDeltaEvent } from "../agent/loop.js";
 import { errorHandler } from "./middleware/error.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { getUsageSummary } from "../services/usage.js";
@@ -17,7 +18,10 @@ export interface ChatModelOptions {
 
 export interface ServerDeps {
   getDbWorker: (projectId: string) => DbWorker;
-  createLoop: (projectId: string, opts: ChatModelOptions) => Promise<StoryForgeLoop & { sessionId: string }>;
+  createLoop: (projectId: string, opts: ChatModelOptions) => Promise<StoryForgeLoop & {
+    sessionId: string;
+    setOnDelta: (cb: ((event: StreamDeltaEvent) => void) | undefined) => void;
+  }>;
   projectsDb: DbWorker;
 }
 
@@ -32,6 +36,13 @@ export async function resetProjects(deps: ServerDeps): Promise<void> {
 
 export async function createApp(deps: ServerDeps): Promise<express.Express> {
   const app = express();
+  app.use((_req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (_req.method === "OPTIONS") { res.status(204).end(); return; }
+    next();
+  });
   app.use(express.json());
 
   const projects = new Map<string, { id: string; name: string; createdAt: string }>();
@@ -117,6 +128,10 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     let pendingUsage: UsageInfo | undefined;
     const usageMap = new Map<number, UsageInfo>();
 
+    loop.setOnDelta((delta) => {
+      res.write(`event: ${delta.type}\ndata: ${JSON.stringify({ content: delta.content })}\n\n`);
+    });
+
     try {
       for await (const event of loop.runTurn(message)) {
         if (event.type === "usage") {
@@ -128,7 +143,7 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
             usageMap.set(msgIdx, pendingUsage);
             pendingUsage = undefined;
           }
-          res.write(`event: assistant\ndata: ${JSON.stringify({ content: event.content })}\n\n`);
+          res.write(`event: assistant\ndata: ${JSON.stringify({ content: event.content, reasoningContent: event.reasoningContent })}\n\n`);
         } else if (event.type === "tool_call") {
           res.write(`event: tool_call\ndata: ${JSON.stringify({ name: event.call.function.name, args: event.call.function.arguments })}\n\n`);
         } else if (event.type === "tool_result") {

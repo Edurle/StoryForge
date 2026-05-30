@@ -127,6 +127,7 @@ describe("Chat SSE", () => {
         yield { type: "done", content: "叶凡在筑基九层" };
       },
       abort() {},
+      setOnDelta: vi.fn(),
     };
     deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
 
@@ -149,6 +150,7 @@ describe("Chat SSE", () => {
         yield { type: "done", content: "ok" };
       },
       abort() {},
+      setOnDelta: vi.fn(),
     };
     deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
 
@@ -170,6 +172,7 @@ describe("Chat SSE", () => {
         yield { type: "done", content: "ok" };
       },
       abort() {},
+      setOnDelta: vi.fn(),
     };
     deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
 
@@ -222,6 +225,7 @@ describe("Chat SSE error handling", () => {
         yield { type: "error", error: new Error("模型过载") };
       },
       abort() {},
+      setOnDelta: vi.fn(),
     };
     deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
     deps.getDbWorker = vi.fn().mockReturnValue({

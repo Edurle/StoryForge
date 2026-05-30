@@ -12,7 +12,17 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:8888",
+      "/api": {
+        target: "http://localhost:8888",
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes) => {
+            if (proxyRes.headers["content-type"]?.includes("text/event-stream")) {
+              proxyRes.headers["x-accel-buffering"] = "no";
+              proxyRes.headers["connection"] = "keep-alive";
+            }
+          });
+        },
+      },
     },
   },
   test: {

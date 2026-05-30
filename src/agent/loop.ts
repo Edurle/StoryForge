@@ -10,6 +10,11 @@ export interface UsageInfo {
   cacheMissTokens: number;
 }
 
+export interface StreamDeltaEvent {
+  type: "reasoning_delta" | "content_delta";
+  content: string;
+}
+
 export type EngineEvent =
   | { type: "assistant"; content: string; reasoningContent?: string }
   | { type: "tool_call"; call: ToolCall }
@@ -20,7 +25,10 @@ export type EngineEvent =
   | { type: "aborted" };
 
 export interface StoryForgeLoopDeps {
-  client: { chat(opts: any): Promise<ChatResponse> };
+  client: {
+    chat(opts: any): Promise<ChatResponse>;
+    onDelta?: (event: StreamDeltaEvent) => void;
+  };
   tools: ToolRegistry;
   prefix: ImmutablePrefix;
   maxIter?: number;

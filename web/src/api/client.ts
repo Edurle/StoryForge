@@ -1,4 +1,5 @@
 const BASE = "/api/projects";
+const BACKEND = `${import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8888"}/api/projects`;
 
 export const api = {
   async getProjects(): Promise<Array<{ id: string; name: string; createdAt: string }>> {
@@ -48,7 +49,7 @@ export const api = {
     opts?: { model?: string; thinking?: string; reasoning_effort?: string },
   ): AbortController {
     const ctrl = new AbortController();
-    fetch(`${BASE}/${projectId}/chat`, {
+    fetch(`${BACKEND}/${projectId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

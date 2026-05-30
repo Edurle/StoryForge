@@ -1,15 +1,16 @@
 import { createApp, type ChatModelOptions } from "./index.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { createDbWorker } from "../db/worker.js";
-import { StoryForgeLoop } from "../agent/loop.js";
-import type { ChatMessage } from "../../lib/reasonix-core/types.js";
+import { StoryForgeLoop, type StreamDeltaEvent } from "../agent/loop.js";
+import type { ChatMessage, ToolCall } from "../../lib/reasonix-core/types.js";
+import type { ReasoningEffort } from "../../lib/reasonix-core/config.js";
 import { createToolRegistry } from "../agent/tools/index.js";
 import { ImmutablePrefix } from "../../lib/reasonix-core/memory/runtime.js";
 import { PauseGate } from "../../lib/reasonix-core/core/pause-gate.js";
 import { loadEndpoint } from "../../lib/reasonix-core/config.js";
 import { loadDotenv } from "../../lib/reasonix-core/env.js";
 import { recordUsage } from "../services/usage.js";
-import { Usage } from "../../lib/reasonix-core/client.js";
+import { DeepSeekClient, Usage } from "../../lib/reasonix-core/client.js";
 import { createSession, touchSession, getLatestSessionId, loadHistoryAsMessages } from "../services/history.js";
 import { randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
@@ -28,6 +29,8 @@ if (!endpoint.apiKey) {
 
 const BASE_URL = endpoint.baseUrl ?? "https://api.deepseek.com";
 const API_KEY = endpoint.apiKey;
+
+const dsClient = new DeepSeekClient({ apiKey: API_KEY, baseUrl: BASE_URL });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = resolve(__dirname, "../../data");
@@ -74,34 +77,57 @@ async function createLoop(projectId: string, chatOpts: ChatModelOptions) {
   await createSession(db, sessionId, chatOpts.model);
   await touchSession(db, sessionId);
 
+  let onDeltaFn: ((event: StreamDeltaEvent) => void) | undefined;
+
   const loop = new StoryForgeLoop({
     client: {
       async chat(opts: any) {
-        const body: Record<string, unknown> = {
+        const thinking = chatOpts.thinking === "enabled" ? "enabled" as const : "disabled" as const;
+        const reasoningEffort = chatOpts.reasoningEffort as ReasoningEffort;
+        const stream = dsClient.stream({
           model: opts.model ?? chatOpts.model,
           messages: opts.messages,
           tools: opts.tools,
-        };
-        if (chatOpts.thinking === "enabled") {
-          body.thinking = { type: "enabled" };
-          body.reasoning_effort = chatOpts.reasoningEffort;
-        } else {
-          body.thinking = { type: "disabled" };
-        }
-        const resp = await fetch(`${BASE_URL}/chat/completions`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
+          thinking,
+          reasoningEffort,
         });
-        if (!resp.ok) {
-          throw new Error(`DeepSeek API error: ${resp.status} ${await resp.text()}`);
+
+        let content = "";
+        let reasoningContent = "";
+        const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
+        let streamUsage: Usage | undefined;
+
+        for await (const chunk of stream) {
+          if (chunk.reasoningDelta) {
+            reasoningContent += chunk.reasoningDelta;
+            onDeltaFn?.({ type: "reasoning_delta", content: chunk.reasoningDelta });
+          }
+          if (chunk.contentDelta) {
+            content += chunk.contentDelta;
+            onDeltaFn?.({ type: "content_delta", content: chunk.contentDelta });
+          }
+          if (chunk.toolCallDelta) {
+            const idx = chunk.toolCallDelta.index;
+            if (chunk.toolCallDelta.id) {
+              toolCallMap.set(idx, {
+                id: chunk.toolCallDelta.id,
+                name: chunk.toolCallDelta.name ?? "",
+                args: chunk.toolCallDelta.argumentsDelta ?? "",
+              });
+            } else if (toolCallMap.has(idx) && chunk.toolCallDelta.argumentsDelta) {
+              toolCallMap.get(idx)!.args += chunk.toolCallDelta.argumentsDelta;
+            }
+          }
+          if (chunk.usage) streamUsage = chunk.usage;
         }
-        const data: any = await resp.json();
-        const choice = data.choices?.[0]?.message ?? {};
-        const usage = Usage.fromApi(data.usage);
+
+        const toolCalls: ToolCall[] = [...toolCallMap.values()].map((tc) => ({
+          id: tc.id,
+          type: "function" as const,
+          function: { name: tc.name, arguments: tc.args },
+        }));
+
+        const usage = streamUsage ?? new Usage();
         recordUsage(db, "default", {
           promptTokens: usage.promptTokens,
           completionTokens: usage.completionTokens,
@@ -109,21 +135,26 @@ async function createLoop(projectId: string, chatOpts: ChatModelOptions) {
           cacheMissTokens: usage.promptCacheMissTokens,
           model: chatOpts.model,
         }).catch(() => {});
+
         return {
-          content: choice.content ?? "",
-          reasoningContent: choice.reasoning_content ?? null,
-          toolCalls: choice.tool_calls ?? [],
+          content,
+          reasoningContent: reasoningContent || null,
+          toolCalls,
           usage,
-          raw: data,
+          raw: {},
         };
       },
+      onDelta: undefined as ((event: StreamDeltaEvent) => void) | undefined,
     },
     tools,
     prefix,
     model: chatOpts.model,
     initialMessages,
   });
-  return Object.assign(loop, { sessionId });
+  return Object.assign(loop, {
+    sessionId,
+    setOnDelta(cb: ((event: StreamDeltaEvent) => void) | undefined) { onDeltaFn = cb; },
+  });
 }
 
 const projectsDb = createDbWorker(resolve(dataDir, "projects.db"));
