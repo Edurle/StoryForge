@@ -9,9 +9,15 @@ import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { getUsageSummary } from "../services/usage.js";
 import { loadHistory, getLatestSessionId, saveMessages } from "../services/history.js";
 
+export interface ChatModelOptions {
+  model: string;
+  thinking: string;
+  reasoningEffort: string;
+}
+
 export interface ServerDeps {
   getDbWorker: (projectId: string) => DbWorker;
-  createLoop: (projectId: string) => Promise<StoryForgeLoop & { sessionId: string }>;
+  createLoop: (projectId: string, opts: ChatModelOptions) => Promise<StoryForgeLoop & { sessionId: string }>;
   projectsDb: DbWorker;
 }
 
@@ -98,13 +104,16 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
       res.status(400).json({ error: "message is required" });
       return;
     }
+    const model = (req.body.model as string | undefined) ?? "deepseek-v4-flash";
+    const thinking = (req.body.thinking as string | undefined) ?? "enabled";
+    const reasoningEffort = (req.body.reasoning_effort as string | undefined) ?? "high";
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders();
 
-    const loop = await deps.createLoop(projectId);
+    const loop = await deps.createLoop(projectId, { model, thinking, reasoningEffort });
     let pendingUsage: UsageInfo | undefined;
     const usageMap = new Map<number, UsageInfo>();
 

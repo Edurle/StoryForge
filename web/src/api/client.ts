@@ -45,12 +45,18 @@ export const api = {
     projectId: string,
     message: string,
     onEvent: (event: { type: string; data: unknown }) => void,
+    opts?: { model?: string; thinking?: string; reasoning_effort?: string },
   ): AbortController {
     const ctrl = new AbortController();
     fetch(`${BASE}/${projectId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        message,
+        model: opts?.model,
+        thinking: opts?.thinking,
+        reasoning_effort: opts?.reasoning_effort,
+      }),
       signal: ctrl.signal,
     })
       .then(async (res) => {

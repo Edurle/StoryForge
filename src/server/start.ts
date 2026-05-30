@@ -1,4 +1,4 @@
-import { createApp } from "./index.js";
+import { createApp, type ChatModelOptions } from "./index.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { createDbWorker } from "../db/worker.js";
 import { StoryForgeLoop } from "../agent/loop.js";
@@ -28,7 +28,6 @@ if (!endpoint.apiKey) {
 
 const BASE_URL = endpoint.baseUrl ?? "https://api.deepseek.com";
 const API_KEY = endpoint.apiKey;
-const MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = resolve(__dirname, "../../data");
@@ -57,7 +56,7 @@ function getDbWorker(projectId: string) {
   return w;
 }
 
-async function createLoop(projectId: string) {
+async function createLoop(projectId: string, chatOpts: ChatModelOptions) {
   const db = getDbWorker(projectId);
   const tools = createToolRegistry({ db, gate });
   const prefix = new ImmutablePrefix({
@@ -72,23 +71,30 @@ async function createLoop(projectId: string) {
   }
 
   const sessionId = randomUUID();
-  await createSession(db, sessionId, MODEL);
+  await createSession(db, sessionId, chatOpts.model);
   await touchSession(db, sessionId);
 
   const loop = new StoryForgeLoop({
     client: {
       async chat(opts: any) {
+        const body: Record<string, unknown> = {
+          model: opts.model ?? chatOpts.model,
+          messages: opts.messages,
+          tools: opts.tools,
+        };
+        if (chatOpts.thinking === "enabled") {
+          body.thinking = { type: "enabled" };
+          body.reasoning_effort = chatOpts.reasoningEffort;
+        } else {
+          body.thinking = { type: "disabled" };
+        }
         const resp = await fetch(`${BASE_URL}/chat/completions`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${API_KEY}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            model: opts.model ?? MODEL,
-            messages: opts.messages,
-            tools: opts.tools,
-          }),
+          body: JSON.stringify(body),
         });
         if (!resp.ok) {
           throw new Error(`DeepSeek API error: ${resp.status} ${await resp.text()}`);
@@ -101,7 +107,7 @@ async function createLoop(projectId: string) {
           completionTokens: usage.completionTokens,
           cacheHitTokens: usage.promptCacheHitTokens,
           cacheMissTokens: usage.promptCacheMissTokens,
-          model: opts.model ?? MODEL,
+          model: chatOpts.model,
         }).catch(() => {});
         return {
           content: choice.content ?? "",
@@ -114,7 +120,7 @@ async function createLoop(projectId: string) {
     },
     tools,
     prefix,
-    model: MODEL,
+    model: chatOpts.model,
     initialMessages,
   });
   return Object.assign(loop, { sessionId });
@@ -123,7 +129,11 @@ async function createLoop(projectId: string) {
 const projectsDb = createDbWorker(resolve(dataDir, "projects.db"));
 
 async function createAppWithDeps() {
-  return createApp({ getDbWorker, createLoop, projectsDb });
+  return createApp({
+    getDbWorker,
+    createLoop,
+    projectsDb,
+  });
 }
 
 const app = await createAppWithDeps();

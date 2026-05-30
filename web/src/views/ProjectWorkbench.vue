@@ -34,6 +34,18 @@
           </template>
         </div>
         <div class="input-area">
+          <select v-model="currentModel" class="chat-select" title="模型">
+            <option value="deepseek-v4-flash">Flash</option>
+            <option value="deepseek-v4-pro">Pro</option>
+          </select>
+          <select v-model="currentThinking" class="chat-select" title="思考模式">
+            <option value="enabled">思考</option>
+            <option value="disabled">不思考</option>
+          </select>
+          <select v-if="currentThinking === 'enabled'" v-model="currentEffort" class="chat-select" title="思考深度">
+            <option value="high">High</option>
+            <option value="max">Max</option>
+          </select>
           <input v-model="input" placeholder="输入创作指令..." @keyup.enter="send" :disabled="sending" />
           <button @click="send" :disabled="sending">发送</button>
         </div>
@@ -74,6 +86,9 @@ const systemPrompt = ref("");
 const showSystemPrompt = ref(false);
 const usage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0 });
 const messagesContainer = ref<HTMLElement | null>(null);
+const currentModel = ref("deepseek-v4-flash");
+const currentThinking = ref("enabled");
+const currentEffort = ref("high");
 let lastUsage: UsageInfo | undefined;
 
 function usagePercent(u: UsageInfo): string {
@@ -170,6 +185,10 @@ async function send() {
       sending.value = false;
       scrollToBottom();
     }
+  }, {
+    model: currentModel.value,
+    thinking: currentThinking.value,
+    reasoning_effort: currentEffort.value,
   });
 }
 </script>
@@ -258,6 +277,14 @@ header {
 .usage-stats {
   font-size: 0.8rem;
   color: #888;
+}
+.chat-select {
+  font-size: 0.8rem;
+  padding: 0.3rem;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
 }
 .system-prompt-section {
   margin-top: 1rem;

@@ -141,6 +141,48 @@ describe("Chat SSE", () => {
     assertNoApiKeyLeak(res.text);
   });
 
+  it("POST /api/projects/:id/chat passes model opts to createLoop", async () => {
+    const mockLoop = {
+      sessionId: "test-session-opts",
+      getMessages: () => [],
+      async *runTurn(_input: string) {
+        yield { type: "done", content: "ok" };
+      },
+      abort() {},
+    };
+    deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
+
+    await request(app)
+      .post("/api/projects/test-project-id/chat")
+      .send({ message: "hi", model: "deepseek-v4-pro", thinking: "disabled", reasoning_effort: "max" });
+
+    expect(deps.createLoop).toHaveBeenCalledWith(
+      "test-project-id",
+      { model: "deepseek-v4-pro", thinking: "disabled", reasoningEffort: "max" },
+    );
+  });
+
+  it("POST /api/projects/:id/chat uses defaults when no model opts", async () => {
+    const mockLoop = {
+      sessionId: "test-session-defaults",
+      getMessages: () => [],
+      async *runTurn(_input: string) {
+        yield { type: "done", content: "ok" };
+      },
+      abort() {},
+    };
+    deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
+
+    await request(app)
+      .post("/api/projects/test-project-id/chat")
+      .send({ message: "hi" });
+
+    expect(deps.createLoop).toHaveBeenCalledWith(
+      "test-project-id",
+      { model: "deepseek-v4-flash", thinking: "enabled", reasoningEffort: "high" },
+    );
+  });
+
   it("GET /api/projects/:id/history returns messages from latest session", async () => {
     const historyData = [
       { seq: 0, role: "user", content: "你好", toolCalls: "[]", toolCallId: "", reasoningContent: "" },
