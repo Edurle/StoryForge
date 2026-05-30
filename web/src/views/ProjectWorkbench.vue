@@ -1,30 +1,37 @@
 <template>
   <div class="workbench">
     <header>
-      <router-link to="/">← 返回</router-link>
+      <router-link to="/" class="back-link">← 返回</router-link>
+      <span class="project-name">{{ projectStore.currentName }}</span>
       <span class="usage-stats" v-if="usage.totalCalls > 0">
-        📊 {{ usage.totalCalls }}次调用 · {{ usage.totalPromptTokens + usage.totalCompletionTokens }} tokens
+        📊 {{ usage.totalCalls }}次 · {{ ((usage.totalPromptTokens + usage.totalCompletionTokens) / 1000).toFixed(1) }}k tokens
       </span>
       <button @click="layout.toggleLeft()">{{ layout.leftCollapsed ? "▶" : "◀" }} 知识库</button>
       <button @click="layout.toggleRight()">{{ layout.rightCollapsed ? "◀" : "▶" }} 编辑器</button>
     </header>
     <div class="panels">
-      <aside v-show="!layout.leftCollapsed" class="panel left" :style="{ width: layout.leftWidth + 'px' }">
-        <h3>知识库</h3>
-        <div class="system-prompt-section">
-          <button class="toggle-btn" @click="showSystemPrompt = !showSystemPrompt">
-            {{ showSystemPrompt ? '▼' : '▶' }} 系统提示词
-          </button>
-          <pre v-if="showSystemPrompt" class="system-prompt-content">{{ systemPrompt }}</pre>
+      <aside v-show="!layout.leftCollapsed" class="left-panel">
+        <div class="panel-header">
+          知识库
+          <button class="panel-action-btn">+ 新增</button>
+        </div>
+        <div class="kb-tabs">
+          <div v-for="tab in kbTabs" :key="tab" :class="['kb-tab', { active: activeKbTab === tab }]" @click="activeKbTab = tab">{{ tab }}</div>
+        </div>
+        <div class="kb-list">
+          <div class="system-prompt-section">
+            <button class="toggle-btn" @click="showSystemPrompt = !showSystemPrompt">
+              {{ showSystemPrompt ? '▼' : '▶' }} 系统提示词
+            </button>
+            <pre v-if="showSystemPrompt" class="system-prompt-content">{{ systemPrompt }}</pre>
+          </div>
         </div>
       </aside>
-      <main class="panel center">
+      <main class="center">
         <div class="messages" ref="messagesContainer">
           <template v-for="(msg, i) in messages" :key="i">
             <div v-if="msg.role === 'user'" class="msg-row user-row">
-              <div class="bubble user-bubble">
-                <div class="bubble-content">{{ msg.content }}</div>
-              </div>
+              <div class="bubble user-bubble">{{ msg.content }}</div>
               <div class="avatar user-avatar">U</div>
             </div>
             <div v-else-if="msg.role === 'assistant'" class="msg-row assistant-row">
@@ -34,10 +41,10 @@
                   <summary>💭 思考过程</summary>
                   <pre class="reasoning-text">{{ msg.reasoningContent }}</pre>
                 </details>
-                <div class="bubble-content" v-html="renderMarkdown(msg.content)"></div>
+                <div v-html="renderMarkdown(msg.content)"></div>
                 <div v-if="msg.usage" class="bubble-usage">
                   输入 {{ msg.usage.promptTokens }} · 输出 {{ msg.usage.completionTokens }}
-                  · 缓存 {{ msg.usage.cacheHitTokens }} · 命中 {{ usagePercent(msg.usage) }}%
+                  · 缓存 {{ usagePercent(msg.usage) }}%
                 </div>
               </div>
             </div>
@@ -64,11 +71,25 @@
             <option value="max">Max</option>
           </select>
           <input v-model="input" placeholder="输入创作指令..." @keyup.enter="send" :disabled="sending" />
-          <button @click="send" :disabled="sending">发送</button>
+          <button class="send-btn" @click="send" :disabled="sending">发送</button>
         </div>
       </main>
-      <aside v-show="!layout.rightCollapsed" class="panel right" :style="{ width: layout.rightWidth + 'px' }">
-        <h3>编辑器</h3>
+      <aside v-show="!layout.rightCollapsed" class="right-panel">
+        <div class="panel-header">
+          编辑器
+          <button class="panel-action-btn">+ 新章节</button>
+        </div>
+        <div class="editor-toolbar">
+          <button><b>B</b></button>
+          <button><i>I</i></button>
+          <button>H₁</button>
+          <button>H₂</button>
+          <button>❝</button>
+          <button>—</button>
+        </div>
+        <div class="editor-content">
+          <p class="editor-placeholder">选择章节开始编辑，或通过对话让 AI 创作内容。</p>
+        </div>
       </aside>
     </div>
   </div>
@@ -108,6 +129,8 @@ const messagesContainer = ref<HTMLElement | null>(null);
 const currentModel = ref("deepseek-v4-flash");
 const currentThinking = ref("enabled");
 const currentEffort = ref("high");
+const activeKbTab = ref("全部");
+const kbTabs = ["全部", "角色", "设定", "时间线", "公式"];
 let lastUsage: UsageInfo | undefined;
 
 function usagePercent(u: UsageInfo): string {
@@ -258,68 +281,153 @@ async function send() {
 header {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 0.6rem 1.2rem;
+  gap: 0.8rem;
+  height: 44px;
+  padding: 0 1.2rem;
   background: #fff;
   border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  flex-shrink: 0;
 }
-header a {
+.back-link {
   color: #6366f1;
   text-decoration: none;
   font-weight: 500;
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
-header a:hover { text-decoration: underline; }
+.back-link:hover { text-decoration: underline; }
+.project-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #111827;
+}
 .usage-stats {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   color: #9ca3af;
   margin-left: auto;
+  white-space: nowrap;
 }
 header button {
-  padding: 0.35rem 0.75rem;
+  padding: 0.25rem 0.6rem;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  border-radius: 5px;
   background: #fff;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: #6b7280;
   transition: all 0.15s;
 }
 header button:hover { background: #f3f4f6; color: #374151; }
 
+/* ===== PANELS ===== */
 .panels {
   flex: 1;
   display: flex;
   overflow: hidden;
 }
-.panel { overflow-y: auto; }
-.left, .right {
-  background: #f8f9fa;
-  border-right: 1px solid #e5e7eb;
-  padding: 1rem;
-}
-.right {
-  border-right: none;
-  border-left: 1px solid #e5e7eb;
-}
-.center {
+
+/* ===== LEFT: 知识库 ===== */
+.left-panel {
   flex: 1;
+  background: #fff;
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.panel-header {
+  padding: 0.7rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+  border-bottom: 1px solid #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.panel-action-btn {
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  color: #6b7280;
+  cursor: pointer;
+}
+.panel-action-btn:hover { background: #f3f4f6; }
+
+.kb-tabs {
+  display: flex;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0 0.4rem;
+  flex-shrink: 0;
+}
+.kb-tab {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.72rem;
+  color: #9ca3af;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.kb-tab.active {
+  color: #6366f1;
+  border-bottom-color: #6366f1;
+  font-weight: 600;
+}
+.kb-tab:hover { color: #6b7280; }
+
+.kb-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.system-prompt-section { margin: 0.5rem 0.6rem; }
+.toggle-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: #6b7280;
+}
+.toggle-btn:hover { color: #374151; }
+.system-prompt-content {
+  margin-top: 0.4rem;
+  padding: 0.6rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* ===== CENTER: 聊天 ===== */
+.center {
+  width: 820px;
+  flex: none;
   display: flex;
   flex-direction: column;
   background: #f0f2f5;
+  overflow: hidden;
 }
-
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1.5rem 2rem;
+  padding: 1.2rem 1rem;
   scroll-behavior: smooth;
 }
+
 .msg-row {
   display: flex;
   align-items: flex-start;
-  margin-bottom: 1rem;
-  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+  gap: 0.5rem;
 }
 .user-row { justify-content: flex-end; }
 .assistant-row { justify-content: flex-start; }
@@ -327,13 +435,13 @@ header button:hover { background: #f3f4f6; color: #374151; }
 .error-row { justify-content: center; }
 
 .avatar {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 700;
   flex-shrink: 0;
   color: #fff;
@@ -342,49 +450,48 @@ header button:hover { background: #f3f4f6; color: #374151; }
 .assistant-avatar { background: #10b981; }
 
 .bubble {
-  max-width: 72%;
-  border-radius: 16px;
-  padding: 0.7rem 1rem;
-  line-height: 1.6;
+  max-width: 75%;
+  border-radius: 14px;
+  padding: 0.6rem 0.9rem;
+  line-height: 1.55;
   word-break: break-word;
+  font-size: 0.88rem;
 }
 .user-bubble {
   background: #6366f1;
   color: #fff;
   border-bottom-right-radius: 4px;
-  box-shadow: 0 1px 4px rgba(99,102,241,0.25);
+  box-shadow: 0 1px 3px rgba(99,102,241,0.2);
 }
-.user-bubble .bubble-content { color: #fff; }
-
 .assistant-bubble {
   background: #fff;
   color: #1f2937;
   border-bottom-left-radius: 4px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .assistant-bubble :deep(h1), .assistant-bubble :deep(h2), .assistant-bubble :deep(h3) {
-  margin: 0.6em 0 0.3em;
+  margin: 0.5em 0 0.2em;
   font-weight: 600;
 }
 .assistant-bubble :deep(h1) { font-size: 1.3em; }
-.assistant-bubble :deep(h2) { font-size: 1.15em; }
+.assistant-bubble :deep(h2) { font-size: 1.1em; }
 .assistant-bubble :deep(h3) { font-size: 1.05em; }
-.assistant-bubble :deep(p) { margin: 0.4em 0; }
+.assistant-bubble :deep(p) { margin: 0.35em 0; }
 .assistant-bubble :deep(pre) {
   background: #1e1e2e;
   color: #cdd6f4;
-  padding: 0.8em;
-  border-radius: 8px;
+  padding: 0.6em 0.8em;
+  border-radius: 6px;
   overflow-x: auto;
-  font-size: 0.85em;
-  margin: 0.5em 0;
+  font-size: 0.82em;
+  margin: 0.4em 0;
 }
 .assistant-bubble :deep(code) {
   background: #f3f4f6;
-  padding: 0.1em 0.35em;
-  border-radius: 4px;
-  font-size: 0.88em;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  font-size: 0.85em;
   color: #e11d48;
 }
 .assistant-bubble :deep(pre code) {
@@ -393,13 +500,13 @@ header button:hover { background: #f3f4f6; color: #374151; }
   padding: 0;
 }
 .assistant-bubble :deep(ul), .assistant-bubble :deep(ol) {
-  padding-left: 1.5em;
-  margin: 0.3em 0;
+  padding-left: 1.4em;
+  margin: 0.25em 0;
 }
 .assistant-bubble :deep(blockquote) {
   border-left: 3px solid #6366f1;
-  padding-left: 0.8em;
-  margin: 0.5em 0;
+  padding-left: 0.7em;
+  margin: 0.4em 0;
   color: #6b7280;
 }
 .assistant-bubble :deep(table) {
@@ -409,8 +516,8 @@ header button:hover { background: #f3f4f6; color: #374151; }
 }
 .assistant-bubble :deep(th), .assistant-bubble :deep(td) {
   border: 1px solid #e5e7eb;
-  padding: 0.35em 0.7em;
-  font-size: 0.92em;
+  padding: 0.3em 0.6em;
+  font-size: 0.9em;
 }
 .assistant-bubble :deep(th) {
   background: #f3f4f6;
@@ -418,31 +525,60 @@ header button:hover { background: #f3f4f6; color: #374151; }
 }
 .assistant-bubble :deep(strong) { color: #111; }
 .assistant-bubble :deep(a) { color: #6366f1; }
-.assistant-bubble :deep(hr) { border: none; border-top: 1px solid #e5e7eb; margin: 0.8em 0; }
+.assistant-bubble :deep(hr) { border: none; border-top: 1px solid #e5e7eb; margin: 0.6em 0; }
 
 .bubble-usage {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
+  color: #b0b8c4;
+  margin-top: 0.3rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid #f6f7f8;
+}
+
+.reasoning-details {
+  margin-bottom: 0.5rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.reasoning-details summary {
+  font-size: 0.75rem;
   color: #9ca3af;
-  margin-top: 0.4rem;
-  padding-top: 0.3rem;
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+  background: #fafbfc;
+  user-select: none;
+}
+.reasoning-details summary:hover { background: #f3f4f6; }
+.reasoning-text {
+  margin: 0;
+  padding: 0.5rem;
+  background: #fafbfc;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 280px;
+  overflow-y: auto;
+  color: #9ca3af;
   border-top: 1px solid #f3f4f6;
+  line-height: 1.5;
 }
 
 .tool-badge {
   background: #fef3c7;
   color: #92400e;
-  font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: 10px;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 8px;
   font-weight: 600;
   flex-shrink: 0;
 }
 .tool-content {
-  font-size: 0.82rem;
-  color: #78716c;
-  background: #fffbeb;
-  padding: 0.35rem 0.65rem;
-  border-radius: 8px;
+  font-size: 0.78rem;
+  color: #a8977a;
+  background: #fffdf5;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
   max-width: 80%;
   word-break: break-word;
 }
@@ -453,91 +589,45 @@ header button:hover { background: #f3f4f6; color: #374151; }
   padding: 0.5rem 1rem;
   border-radius: 10px;
   border: 1px solid #fecaca;
-  font-size: 0.9rem;
-}
-
-.reasoning-details {
-  margin-bottom: 0.6rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.reasoning-details summary {
-  font-size: 0.8rem;
-  color: #6b7280;
-  cursor: pointer;
-  padding: 0.4rem 0.6rem;
-  background: #f9fafb;
-  user-select: none;
-}
-.reasoning-details summary:hover { background: #f3f4f6; }
-.reasoning-text {
-  margin: 0;
-  padding: 0.6rem;
-  background: #f9fafb;
-  font-size: 0.8rem;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  max-height: 280px;
-  overflow-y: auto;
-  color: #6b7280;
-  border-top: 1px solid #e5e7eb;
-}
-
-.typing-indicator {
-  display: flex;
-  gap: 4px;
-  padding: 0.3rem 0;
-}
-.typing-indicator span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #d1d5db;
-  animation: typing 1.2s infinite;
-}
-.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes typing {
-  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-4px); }
+  font-size: 0.88rem;
 }
 
 .input-area {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.8rem 1.5rem;
+  gap: 0.4rem;
+  padding: 0.7rem 0.8rem;
   background: #fff;
   border-top: 1px solid #e5e7eb;
 }
 .input-area input {
   flex: 1;
-  padding: 0.6rem 1rem;
+  padding: 0.5rem 0.8rem;
   border: 1.5px solid #e5e7eb;
-  border-radius: 10px;
-  font-size: 0.9rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
   outline: none;
   transition: border-color 0.15s;
 }
 .input-area input:focus { border-color: #6366f1; }
-.input-area button {
-  padding: 0.6rem 1.2rem;
+.send-btn {
+  padding: 0.5rem 1rem;
   background: #6366f1;
   color: #fff;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   font-weight: 600;
+  font-size: 0.85rem;
   cursor: pointer;
   transition: background 0.15s;
 }
-.input-area button:hover { background: #4f46e5; }
-.input-area button:disabled { background: #c7d2fe; cursor: not-allowed; }
+.send-btn:hover { background: #4f46e5; }
+.send-btn:disabled { background: #c7d2fe; cursor: not-allowed; }
 .chat-select {
-  font-size: 0.8rem;
-  padding: 0.4rem 0.5rem;
+  font-size: 0.72rem;
+  padding: 0.35rem 0.4rem;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #f9fafb;
   cursor: pointer;
   outline: none;
@@ -545,25 +635,42 @@ header button:hover { background: #f3f4f6; color: #374151; }
 }
 .chat-select:focus { border-color: #6366f1; }
 
-.system-prompt-section { margin-top: 1rem; }
-.toggle-btn {
+/* ===== RIGHT: 编辑器 ===== */
+.right-panel {
+  flex: 1;
+  background: #fff;
+  border-left: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.editor-toolbar {
+  display: flex;
+  gap: 0.2rem;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid #f3f4f6;
+  flex-shrink: 0;
+}
+.editor-toolbar button {
   background: none;
   border: none;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.35rem;
+  color: #9ca3af;
   cursor: pointer;
-  font-size: 0.9rem;
-  color: #6b7280;
+  border-radius: 3px;
 }
-.toggle-btn:hover { color: #374151; }
-.system-prompt-content {
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  font-size: 0.8rem;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  max-height: 400px;
+.editor-toolbar button:hover { background: #f3f4f6; color: #374151; }
+.editor-content {
+  flex: 1;
+  padding: 0.8rem;
   overflow-y: auto;
+}
+.editor-placeholder {
+  text-align: center;
+  color: #9ca3af;
+  margin-top: 2rem;
+  font-size: 0.85rem;
 }
 </style>

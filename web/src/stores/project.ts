@@ -1,10 +1,15 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { api } from "../api/client.js";
 
 export const useProjectStore = defineStore("project", () => {
   const projects = ref<Array<{ id: string; name: string; createdAt: string }>>([]);
   const currentId = ref<string | null>(null);
+
+  const currentName = computed(() => {
+    if (!currentId.value) return "";
+    return projects.value.find(p => p.id === currentId.value)?.name ?? "";
+  });
 
   async function fetchProjects() {
     projects.value = await api.getProjects();
@@ -20,5 +25,5 @@ export const useProjectStore = defineStore("project", () => {
     currentId.value = id;
   }
 
-  return { projects, currentId, fetchProjects, createProject, setCurrent };
+  return { projects, currentId, currentName, fetchProjects, createProject, setCurrent };
 });

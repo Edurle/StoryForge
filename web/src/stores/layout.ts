@@ -2,8 +2,8 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 
 export const useLayoutStore = defineStore("layout", () => {
-  const leftWidth = ref(250);
-  const rightWidth = ref(300);
+  const leftWidth = ref(320);
+  const rightWidth = ref(380);
   const leftCollapsed = ref(false);
   const rightCollapsed = ref(false);
 
@@ -16,8 +16,8 @@ export const useLayoutStore = defineStore("layout", () => {
         leftCollapsed?: boolean;
         rightCollapsed?: boolean;
       };
-      leftWidth.value = data.leftWidth ?? 250;
-      rightWidth.value = data.rightWidth ?? 300;
+      leftWidth.value = data.leftWidth ?? 320;
+      rightWidth.value = data.rightWidth ?? 380;
       leftCollapsed.value = data.leftCollapsed ?? false;
       rightCollapsed.value = data.rightCollapsed ?? false;
     }
