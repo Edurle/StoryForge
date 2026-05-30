@@ -37,10 +37,12 @@
             <div v-else-if="msg.role === 'assistant'" class="msg-row assistant-row">
               <div class="avatar assistant-avatar">A</div>
               <div class="bubble assistant-bubble">
-                <details v-if="msg.reasoningContent" class="reasoning-details">
-                  <summary>💭 思考过程</summary>
-                  <pre class="reasoning-text">{{ msg.reasoningContent }}</pre>
-                </details>
+                <div v-if="msg.reasoningContent" class="reasoning-section">
+                  <div class="reasoning-toggle" @click="msg.reasoningExpanded = !msg.reasoningExpanded">
+                    {{ msg.reasoningExpanded ? '▼' : '▶' }} 💭 思考过程
+                  </div>
+                  <pre v-show="msg.reasoningExpanded" class="reasoning-text">{{ msg.reasoningContent }}</pre>
+                </div>
                 <div v-html="renderMarkdown(msg.content)"></div>
                 <div v-if="msg.usage" class="bubble-usage">
                   输入 {{ msg.usage.promptTokens }} · 输出 {{ msg.usage.completionTokens }}
@@ -117,6 +119,7 @@ interface DisplayMessage {
   role: string;
   content: string;
   reasoningContent?: string;
+  reasoningExpanded?: boolean;
   usage?: UsageInfo;
 }
 
@@ -223,8 +226,8 @@ async function send() {
     if (event.type === "reasoning_delta") {
       const delta = event.data as { content: string };
       if (!pendingMsg) {
-        pendingMsg = { role: "assistant", content: "", reasoningContent: "" };
-        messages.value.push(pendingMsg);
+        messages.value.push({ role: "assistant", content: "", reasoningContent: "", reasoningExpanded: true });
+        pendingMsg = messages.value[messages.value.length - 1]!;
       }
       if (!pendingMsg.reasoningContent) pendingMsg.reasoningContent = "";
       pendingMsg.reasoningContent += delta.content;
@@ -232,8 +235,8 @@ async function send() {
     } else if (event.type === "content_delta") {
       const delta = event.data as { content: string };
       if (!pendingMsg) {
-        pendingMsg = { role: "assistant", content: "" };
-        messages.value.push(pendingMsg);
+        messages.value.push({ role: "assistant", content: "", reasoningExpanded: false });
+        pendingMsg = messages.value[messages.value.length - 1]!;
       }
       pendingMsg.content += delta.content;
       scrollToBottom();
@@ -244,6 +247,7 @@ async function send() {
       if (pendingMsg) {
         pendingMsg.content = data.content;
         if (data.reasoningContent) pendingMsg.reasoningContent = data.reasoningContent;
+        pendingMsg.reasoningExpanded = false;
         pendingMsg.usage = lastUsage;
         pendingMsg = undefined;
       } else {
@@ -539,21 +543,22 @@ header button:hover { background: #f3f4f6; color: #374151; }
   border-top: 1px solid #f6f7f8;
 }
 
-.reasoning-details {
+.reasoning-section {
   margin-bottom: 0.5rem;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   overflow: hidden;
 }
-.reasoning-details summary {
+.reasoning-toggle {
   font-size: 0.75rem;
   color: #9ca3af;
   cursor: pointer;
   padding: 0.3rem 0.5rem;
   background: #fafbfc;
   user-select: none;
+  transition: background 0.15s;
 }
-.reasoning-details summary:hover { background: #f3f4f6; }
+.reasoning-toggle:hover { background: #f3f4f6; }
 .reasoning-text {
   margin: 0;
   padding: 0.5rem;
