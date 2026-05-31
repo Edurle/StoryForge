@@ -171,7 +171,13 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
       const newMessages = allMessages.slice(seqBefore);
       const startSeq = await getNextSeq(db, sessionId);
 
-      saveMessages(db, sessionId, newMessages, startSeq, usageMap).catch(() => {});
+      const localUsageMap = new Map<number, UsageInfo>();
+      for (const [globalIdx, u] of usageMap) {
+        const localIdx = globalIdx - seqBefore;
+        if (localIdx >= 0) localUsageMap.set(localIdx, u);
+      }
+
+      saveMessages(db, sessionId, newMessages, startSeq, localUsageMap).catch(() => {});
       saveSnapshot(db, projectId, sessionId, allMessages, loop.lastPromptTokenCount, wasCompressed ? 1 : 0).catch(() => {});
       cleanOldSnapshots(db, sessionId).catch(() => {});
       touchSession(db, sessionId).catch(() => {});
@@ -184,12 +190,12 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
           model,
         }, "compress").catch(() => {});
       }
-      if (pendingUsage) {
+      for (const [, u] of usageMap) {
         recordUsage(db, sessionId, {
-          promptTokens: pendingUsage.promptTokens,
-          completionTokens: pendingUsage.completionTokens,
-          cacheHitTokens: pendingUsage.cacheHitTokens,
-          cacheMissTokens: pendingUsage.cacheMissTokens,
+          promptTokens: u.promptTokens,
+          completionTokens: u.completionTokens,
+          cacheHitTokens: u.cacheHitTokens,
+          cacheMissTokens: u.cacheMissTokens,
           model,
         }).catch(() => {});
       }

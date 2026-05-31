@@ -466,7 +466,7 @@ async function resolveGate(approve: boolean) {
 
 <style scoped>
 .workbench {
-  height: 100vh;
+  height: 98vh;
   display: flex;
   flex-direction: column;
   background: #f0f2f5;
