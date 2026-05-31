@@ -220,21 +220,29 @@ describe("Chat SSE error handling", () => {
   });
 });
 
-describe("Content routes (placeholder)", () => {
+describe("Chapter routes", () => {
   let app: Awaited<ReturnType<typeof createApp>>;
 
   beforeEach(async () => {
     app = await createApp(createMockDeps());
   });
 
-  it("GET /api/projects/:id/tree returns empty array", async () => {
-    const res = await request(app).get("/api/projects/test-id/tree");
+  it("GET /api/projects/:id/chapters returns array", async () => {
+    const res = await request(app).get("/api/projects/test-id/chapters");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([]);
+    expect(Array.isArray(res.body)).toBe(true);
   });
 
-  it("GET /api/projects/:id/content/* returns 404", async () => {
-    const res = await request(app).get("/api/projects/test-id/content/chapter-1");
-    expect(res.status).toBe(404);
+  it("GET /api/projects/:id/chapters/:chapterId/content returns content", async () => {
+    const res = await request(app).get("/api/projects/test-id/chapters/1/content");
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("chapterId");
+    expect(res.body).toHaveProperty("content");
+  });
+
+  it("GET /api/projects/:id/export returns text file", async () => {
+    const res = await request(app).get("/api/projects/test-id/export");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
   });
 });

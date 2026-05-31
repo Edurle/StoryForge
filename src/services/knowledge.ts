@@ -210,3 +210,42 @@ export async function queryAllTimeline(w: DbWorker): Promise<TimelineEvent[]> {
     characters: JSON.parse(row.characters) as string[],
   }));
 }
+
+export interface ChapterSummary {
+  id: number;
+  volume: number;
+  title: string;
+  status: string;
+  segmentCount: number;
+}
+
+export async function queryChapters(w: DbWorker): Promise<ChapterSummary[]> {
+  const res = await w.request({
+    id: 0,
+    type: "query",
+    sql: `SELECT c.id, c.volume, c.title, c.status, COUNT(s.id) AS segment_count
+      FROM chapters c LEFT JOIN segments s ON s.chapter_id = c.id
+      GROUP BY c.id ORDER BY c.volume, c.id`,
+  });
+  if (!res.ok || !res.data) return [];
+  const rows = res.data as { id: number; volume: number; title: string; status: string; segment_count: number }[];
+  return rows.map(row => ({
+    id: row.id,
+    volume: row.volume,
+    title: row.title,
+    status: row.status,
+    segmentCount: row.segment_count,
+  }));
+}
+
+export async function queryChapterContent(w: DbWorker, chapterId: number): Promise<string> {
+  const res = await w.request({
+    id: 0,
+    type: "query",
+    sql: "SELECT content FROM segments WHERE chapter_id = ? ORDER BY seq, id",
+    params: [chapterId],
+  });
+  if (!res.ok || !res.data) return "";
+  const rows = res.data as { content: string }[];
+  return rows.map(row => row.content).join("\n\n");
+}

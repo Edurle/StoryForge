@@ -12,7 +12,7 @@ import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { getUsageSummary, getCompressUsageSummary } from "../services/usage.js";
 import { recordUsage } from "../services/usage.js";
 import { loadHistory, saveMessages, saveSnapshot, cleanOldSnapshots, getNextSeq, touchSession } from "../services/history.js";
-import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations } from "../services/knowledge.js";
+import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations, queryChapters, queryChapterContent } from "../services/knowledge.js";
 
 export interface ServerDeps {
   getDbWorker: (projectId: string) => DbWorker;
@@ -233,12 +233,34 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     res.json(messages);
   });
 
-  app.get("/api/projects/:projectId/tree", (_req, res) => {
-    res.json([]);
+  app.get("/api/projects/:projectId/chapters", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryChapters(db));
   });
 
-  app.get("/api/projects/:projectId/content/{*path}", (_req, res) => {
-    res.status(404).json({ error: "Content not found" });
+  app.get("/api/projects/:projectId/chapters/:chapterId/content", async (req, res) => {
+    const projectId = (req.params as Record<string, string | undefined>).projectId!;
+    const chapterId = parseInt((req.params as Record<string, string | undefined>).chapterId!, 10);
+    if (isNaN(chapterId)) { res.status(400).json({ error: "invalid chapterId" }); return; }
+    const db = deps.getDbWorker(projectId);
+    const content = await queryChapterContent(db, chapterId);
+    res.json({ chapterId, content });
+  });
+
+  app.get("/api/projects/:projectId/export", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    const chapters = await queryChapters(db);
+    const parts: string[] = [];
+    for (const ch of chapters) {
+      const content = await queryChapterContent(db, ch.id);
+      parts.push(`${ch.title}\n\n${content}`);
+    }
+    const text = parts.join("\n\n---\n\n");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Content-Disposition", "attachment; filename=export.txt");
+    res.send(text);
   });
 
   app.get("/api/projects/:projectId/knowledge/characters", async (_req, res) => {

@@ -109,4 +109,17 @@ export const api = {
     const res = await fetch(`${BACKEND}/${projectId}/knowledge/${entity}`);
     return res.json();
   },
+  async getChapters(projectId: string): Promise<Array<{
+    id: number; volume: number; title: string; status: string; segmentCount: number;
+  }>> {
+    const res = await fetch(`${BACKEND}/${projectId}/chapters`);
+    return res.json();
+  },
+  async getChapterContent(projectId: string, chapterId: number): Promise<{ chapterId: number; content: string }> {
+    const res = await fetch(`${BACKEND}/${projectId}/chapters/${chapterId}/content`);
+    return res.json();
+  },
+  getExportUrl(projectId: string): string {
+    return `${BACKEND}/${projectId}/export`;
+  },
 };

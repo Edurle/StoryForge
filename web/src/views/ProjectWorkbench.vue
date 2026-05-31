@@ -29,60 +29,62 @@
       <aside v-show="!layout.leftCollapsed" class="left-panel">
         <div class="panel-header">
           知识库
-          <button class="panel-action-btn">+ 新增</button>
         </div>
         <div class="kb-tabs">
           <div v-for="tab in kbTabs" :key="tab" :class="['kb-tab', { active: activeKbTab === tab }]" @click="activeKbTab = tab">{{ tab }}</div>
         </div>
         <div class="kb-list">
-          <div class="system-prompt-section">
-            <button class="toggle-btn" @click="showSystemPrompt = !showSystemPrompt">
-              {{ showSystemPrompt ? '▼' : '▶' }} 系统提示词
-            </button>
-            <pre v-if="showSystemPrompt" class="system-prompt-content">{{ systemPrompt }}</pre>
-          </div>
-          <div class="kb-cards">
-            <template v-if="activeKbTab === '全部' || activeKbTab === '角色'">
-              <div v-for="c in kbData.characters" :key="'c-'+c.name" class="kb-card" @click="activeKbTab = '角色'">
-                <div class="kb-card-header"><span class="kb-card-name">{{ c.name }}</span><span class="kb-card-badge">{{ c.stage }}</span></div>
-                <div class="kb-card-attrs"><span v-for="(v, k) in c.attrs" :key="k" class="kb-attr">{{ k }}: {{ v }}</span></div>
+          <template v-if="activeKbTab === '提示词'">
+            <div class="kb-cards">
+              <div class="kb-card">
+                <pre class="system-prompt-content">{{ systemPrompt }}</pre>
               </div>
-            </template>
-            <template v-if="activeKbTab === '全部' || activeKbTab === '设定'">
-              <div v-for="s in kbData.settings" :key="'s-'+s.topic" class="kb-card">
-                <div class="kb-card-header"><span class="kb-card-name">{{ s.topic }}</span></div>
-                <div class="kb-card-content">{{ s.content }}</div>
-              </div>
-            </template>
-            <template v-if="activeKbTab === '全部' || activeKbTab === '时间线'">
-              <div v-for="t in kbData.timeline" :key="'t-'+t.id" class="kb-card">
-                <div class="kb-card-header"><span class="kb-card-name">{{ t.time }}</span></div>
-                <div class="kb-card-content">{{ t.description }}</div>
-                <div class="kb-card-attrs"><span v-for="ch in t.characters" :key="ch" class="kb-attr">{{ ch }}</span></div>
-              </div>
-            </template>
-            <template v-if="activeKbTab === '全部' || activeKbTab === '公式'">
-              <div v-for="f in kbData.formulas" :key="'f-'+f.name" class="kb-card">
-                <div class="kb-card-header"><span class="kb-card-name">{{ f.name }}</span></div>
-                <div class="kb-card-content">{{ f.template }}</div>
-              </div>
-            </template>
-            <template v-if="activeKbTab === '全部'">
-              <div v-for="it in kbData.items" :key="'i-'+it.name" class="kb-card">
-                <div class="kb-card-header"><span class="kb-card-name">{{ it.name }}</span><span class="kb-card-badge">{{ it.type }}</span></div>
-                <div class="kb-card-attrs"><span v-for="(v, k) in it.attrs" :key="k" class="kb-attr">{{ k }}: {{ v }}</span></div>
-              </div>
-              <div v-for="fa in kbData.factions" :key="'fa-'+fa.name" class="kb-card">
-                <div class="kb-card-header"><span class="kb-card-name">{{ fa.name }}</span></div>
-                <div class="kb-card-content">{{ fa.description }}</div>
-              </div>
-              <div v-for="lo in kbData.locations" :key="'lo-'+lo.name" class="kb-card">
-                <div class="kb-card-header"><span class="kb-card-name">{{ lo.name }}</span></div>
-                <div class="kb-card-content">{{ lo.description }}</div>
-              </div>
-            </template>
-            <div v-if="isKbEmpty" class="kb-empty">暂无数据</div>
-          </div>
+            </div>
+          </template>
+          <template v-else>
+            <div class="kb-cards">
+              <template v-if="activeKbTab === '全部' || activeKbTab === '角色'">
+                <div v-for="c in kbData.characters" :key="'c-'+c.name" class="kb-card" @click="activeKbTab = '角色'">
+                  <div class="kb-card-header"><span class="kb-card-name">{{ c.name }}</span><span class="kb-card-badge">{{ c.stage }}</span></div>
+                  <div class="kb-card-attrs"><span v-for="(v, k) in c.attrs" :key="k" class="kb-attr">{{ k }}: {{ v }}</span></div>
+                </div>
+              </template>
+              <template v-if="activeKbTab === '全部' || activeKbTab === '设定'">
+                <div v-for="s in kbData.settings" :key="'s-'+s.topic" class="kb-card">
+                  <div class="kb-card-header"><span class="kb-card-name">{{ s.topic }}</span></div>
+                  <div class="kb-card-content">{{ s.content }}</div>
+                </div>
+              </template>
+              <template v-if="activeKbTab === '全部' || activeKbTab === '时间线'">
+                <div v-for="t in kbData.timeline" :key="'t-'+t.id" class="kb-card">
+                  <div class="kb-card-header"><span class="kb-card-name">{{ t.time }}</span></div>
+                  <div class="kb-card-content">{{ t.description }}</div>
+                  <div class="kb-card-attrs"><span v-for="ch in t.characters" :key="ch" class="kb-attr">{{ ch }}</span></div>
+                </div>
+              </template>
+              <template v-if="activeKbTab === '全部' || activeKbTab === '公式'">
+                <div v-for="f in kbData.formulas" :key="'f-'+f.name" class="kb-card">
+                  <div class="kb-card-header"><span class="kb-card-name">{{ f.name }}</span></div>
+                  <div class="kb-card-content">{{ f.template }}</div>
+                </div>
+              </template>
+              <template v-if="activeKbTab === '全部'">
+                <div v-for="it in kbData.items" :key="'i-'+it.name" class="kb-card">
+                  <div class="kb-card-header"><span class="kb-card-name">{{ it.name }}</span><span class="kb-card-badge">{{ it.type }}</span></div>
+                  <div class="kb-card-attrs"><span v-for="(v, k) in it.attrs" :key="k" class="kb-attr">{{ k }}: {{ v }}</span></div>
+                </div>
+                <div v-for="fa in kbData.factions" :key="'fa-'+fa.name" class="kb-card">
+                  <div class="kb-card-header"><span class="kb-card-name">{{ fa.name }}</span></div>
+                  <div class="kb-card-content">{{ fa.description }}</div>
+                </div>
+                <div v-for="lo in kbData.locations" :key="'lo-'+lo.name" class="kb-card">
+                  <div class="kb-card-header"><span class="kb-card-name">{{ lo.name }}</span></div>
+                  <div class="kb-card-content">{{ lo.description }}</div>
+                </div>
+              </template>
+              <div v-if="isKbEmpty" class="kb-empty">暂无数据</div>
+            </div>
+          </template>
         </div>
       </aside>
       <main class="center">
@@ -141,19 +143,24 @@
       </main>
       <aside v-show="!layout.rightCollapsed" class="right-panel">
         <div class="panel-header">
-          编辑器
-          <button class="panel-action-btn">+ 新章节</button>
+          章节
+          <a v-if="chapters.length > 0" :href="api.getExportUrl(props.id)" download="export.txt" class="panel-action-btn">导出 TXT</a>
         </div>
-        <div class="editor-toolbar">
-          <button><b>B</b></button>
-          <button><i>I</i></button>
-          <button>H₁</button>
-          <button>H₂</button>
-          <button>❝</button>
-          <button>—</button>
+        <div class="chapter-tree" v-if="chapters.length > 0">
+          <div v-for="vol in volumes" :key="vol" class="chapter-volume">
+            <div class="volume-header">第{{ vol }}卷</div>
+            <div v-for="ch in chaptersByVolume(vol)" :key="ch.id"
+              :class="['chapter-item', { active: selectedChapterId === ch.id }]"
+              @click="selectChapter(ch.id)">
+              <span class="chapter-title">{{ ch.title }}</span>
+              <span class="chapter-segments">{{ ch.segmentCount }}段</span>
+            </div>
+          </div>
         </div>
-        <div class="editor-content">
-          <p class="editor-placeholder">选择章节开始编辑，或通过对话让 AI 创作内容。</p>
+        <div v-else class="editor-placeholder">暂无章节，通过对话让 AI 创建。</div>
+        <div v-if="selectedChapterId != null" class="chapter-content-area">
+          <div v-if="chapterLoading" class="editor-placeholder">加载中...</div>
+          <pre v-else class="chapter-text">{{ chapterContent }}</pre>
         </div>
       </aside>
     </div>
@@ -202,7 +209,6 @@ const input = ref("");
 const sending = ref(false);
 const messages = ref<DisplayMessage[]>([]);
 const systemPrompt = ref("");
-const showSystemPrompt = ref(false);
 const usage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 });
 const compressUsage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 });
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -210,7 +216,11 @@ const currentModel = ref("deepseek-v4-flash");
 const currentThinking = ref("enabled");
 const currentEffort = ref("high");
 const activeKbTab = ref("全部");
-const kbTabs = ["全部", "角色", "设定", "时间线", "公式"];
+const chapters = ref<Array<{ id: number; volume: number; title: string; status: string; segmentCount: number }>>([]);
+const selectedChapterId = ref<number | null>(null);
+const chapterContent = ref("");
+const chapterLoading = ref(false);
+const kbTabs = ["全部", "角色", "设定", "时间线", "公式", "提示词"];
 const kbData = ref<{
   characters: Array<{ name: string; stage: string; attrs: Record<string, unknown> }>;
   settings: Array<{ topic: string; content: string }>;
@@ -230,6 +240,12 @@ const isKbEmpty = computed(() => {
   return d.characters.length + d.settings.length + d.timeline.length + d.formulas.length + d.items.length + d.factions.length + d.locations.length === 0;
 });
 
+const volumes = computed(() => [...new Set(chapters.value.map(c => c.volume))].sort());
+
+function chaptersByVolume(vol: number) {
+  return chapters.value.filter(c => c.volume === vol);
+}
+
 async function loadKnowledge() {
   try {
     const [characters, settings, formulas, timeline, items, factions, locations] = await Promise.all([
@@ -244,6 +260,28 @@ async function loadKnowledge() {
     kbData.value = { characters, settings, formulas, timeline, items, factions, locations };
   } catch {}
 }
+
+async function loadChapters() {
+  try {
+    chapters.value = await api.getChapters(props.id);
+  } catch {}
+}
+
+async function selectChapter(id: number) {
+  if (selectedChapterId.value === id) return;
+  selectedChapterId.value = id;
+  chapterLoading.value = true;
+  chapterContent.value = "";
+  try {
+    const res = await api.getChapterContent(props.id, id);
+    chapterContent.value = res.content;
+  } catch {
+    chapterContent.value = "加载失败";
+  } finally {
+    chapterLoading.value = false;
+  }
+}
+
 const autoApproveB = ref(false);
 const gateRequest = ref<{ id: number; kind: string; payload: unknown } | null>(null);
 let lastUsage: UsageInfo | undefined;
@@ -358,7 +396,8 @@ async function loadHistory() {
   loadSystemPrompt();
   loadUsage();
   loadHistory();
-  loadKnowledge();
+   loadKnowledge();
+   loadChapters();
 });
 
 async function send() {
@@ -441,6 +480,7 @@ async function send() {
       sending.value = false;
       loadUsage();
       loadKnowledge();
+      loadChapters();
     } else if (event.type === "error") {
       pendingMsg = undefined;
       const data = event.data as { error: string };
@@ -622,26 +662,12 @@ header button:hover { background: #f3f4f6; color: #374151; }
   overflow-y: auto;
 }
 
-.system-prompt-section { margin: 0.5rem 0.6rem; }
-.toggle-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 0.82rem;
-  color: #6b7280;
-}
-.toggle-btn:hover { color: #374151; }
 .system-prompt-content {
-  margin-top: 0.4rem;
   padding: 0.6rem;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
   font-size: 0.78rem;
   white-space: pre-wrap;
   word-wrap: break-word;
-  max-height: 400px;
-  overflow-y: auto;
+  margin: 0;
 }
 
 .kb-cards { padding: 0.4rem 0; }
@@ -924,7 +950,7 @@ header button:hover { background: #f3f4f6; color: #374151; }
 }
 .chat-select:focus { border-color: #6366f1; }
 
-/* ===== RIGHT: 编辑器 ===== */
+/* ===== RIGHT: 章节 ===== */
 .right-panel {
   flex: 1;
   background: #fff;
@@ -934,33 +960,52 @@ header button:hover { background: #f3f4f6; color: #374151; }
   overflow: hidden;
   flex-shrink: 0;
 }
-.editor-toolbar {
-  display: flex;
-  gap: 0.2rem;
-  padding: 0.35rem 0.6rem;
-  border-bottom: 1px solid #f3f4f6;
-  flex-shrink: 0;
-}
-.editor-toolbar button {
-  background: none;
-  border: none;
-  font-size: 0.78rem;
-  padding: 0.2rem 0.35rem;
-  color: #9ca3af;
-  cursor: pointer;
-  border-radius: 3px;
-}
-.editor-toolbar button:hover { background: #f3f4f6; color: #374151; }
-.editor-content {
-  flex: 1;
-  padding: 0.8rem;
-  overflow-y: auto;
-}
 .editor-placeholder {
   text-align: center;
   color: #9ca3af;
   margin-top: 2rem;
   font-size: 0.85rem;
+}
+.chapter-tree {
+  border-bottom: 1px solid #f3f4f6;
+  max-height: 40%;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.volume-header {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #9ca3af;
+  background: #fafbfc;
+}
+.chapter-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.8rem 0.4rem 1.4rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.chapter-item:hover { background: #f3f4f6; }
+.chapter-item.active { background: #eff6ff; color: #1d4ed8; }
+.chapter-title { color: #374151; }
+.chapter-item.active .chapter-title { color: #1d4ed8; font-weight: 500; }
+.chapter-segments { font-size: 0.68rem; color: #b0b8c4; }
+.chapter-content-area {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid #f3f4f6;
+}
+.chapter-text {
+  padding: 0.8rem;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  color: #1f2937;
 }
 
 .gate-overlay {
