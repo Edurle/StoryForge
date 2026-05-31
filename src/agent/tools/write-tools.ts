@@ -79,6 +79,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO characters (name, stage, custom_attrs) VALUES (?, ?, ?)",
           params: [args.name, args.stage ?? "", JSON.stringify(args.attrs ?? {})],
         });
+        await db.request({ id: 0, type: "run", sql: "INSERT OR IGNORE INTO kg_nodes (id, type, label) VALUES (?, 'character', ?)", params: [args.name, args.name] });
         return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
@@ -313,11 +314,11 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "timeline",
-    description: "时间线管理。action: query（A级）按范围查询事件，create（B级）创建事件，edit（C级）编辑事件，delete（C级）删除事件。",
+    description: "时间线管理。action: list（A级）列出全部事件，query（A级）按范围查询事件，create（B级）创建事件，edit（C级）编辑事件，delete（C级）删除事件。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：query | create | edit | delete" },
+        action: { type: "string", description: "操作：list | query | create | edit | delete" },
         id: { type: "string", description: "事件ID" },
         time: { type: "string", description: "事件时间" },
         description: { type: "string", description: "事件描述" },
@@ -331,6 +332,18 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
       required: ["action"],
     },
     fn: async (args: { action: string; id?: string; time?: string; description?: string; characters?: string[]; location?: string; cause_id?: string; event_id?: string; from?: string; to?: string }) => {
+      if (args.action === "list") {
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, time, description, characters, location FROM timeline_events ORDER BY time",
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        const rows = res.data as { id: string; time: string; description: string; characters: string; location: string }[];
+        return JSON.stringify(rows.map(row => ({
+          ...row,
+          characters: JSON.parse(row.characters) as string[],
+        })));
+      }
       if (args.action === "query") {
         if (!args.from || !args.to) return JSON.stringify({ error: "from and to required for query" });
         const result = await queryTimeline(db, { from: args.from, to: args.to });
@@ -463,11 +476,11 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "setting",
-    description: "全局设定管理。action: query（A级）查询设定，write（B级）写入设定，upsert 策略。",
+    description: "全局设定管理。action: list（A级）列出设定，query（A级）查询设定，write（B级）写入设定，upsert 策略。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：query | write" },
+        action: { type: "string", description: "操作：list | query | write" },
         key: { type: "string", description: "设定键名" },
         value: { type: "string", description: "设定值" },
         description: { type: "string", description: "说明" },
@@ -475,6 +488,14 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
       required: ["action"],
     },
     fn: async (args: { action: string; key?: string; value?: string; description?: string }) => {
+      if (args.action === "list") {
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT key, value, description FROM global_constants ORDER BY key",
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        return JSON.stringify(res.data);
+      }
       if (args.action === "query") {
         if (!args.key) return JSON.stringify({ error: "key required for query" });
         const result = await querySetting(db, args.key);
@@ -551,18 +572,39 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "item",
-    description: "物品管理。action: create（B级）创建物品，edit（B级）编辑物品（attrs 合并），delete（C级）删除物品。",
+    description: "物品管理。action: list（A级）列出物品，query（A级）查询单物品，create（B级）创建物品，edit（B级）编辑物品（attrs 合并），delete（C级）删除物品。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：create | edit | delete" },
+        action: { type: "string", description: "操作：list | query | create | edit | delete" },
         name: { type: "string", description: "物品名" },
         type: { type: "string", description: "类型" },
         attrs: { type: "object", description: "自定义属性" },
       },
-      required: ["action", "name"],
+      required: ["action"],
     },
-    fn: async (args: { action: string; name: string; type?: string; attrs?: Record<string, unknown> }) => {
+    fn: async (args: { action: string; name?: string; type?: string; attrs?: Record<string, unknown> }) => {
+      if (args.action === "list") {
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT name, type, custom_attrs FROM items ORDER BY name",
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        const rows = res.data as { name: string; type: string; custom_attrs: string }[];
+        return JSON.stringify(rows.map(row => ({ name: row.name, type: row.type, attrs: JSON.parse(row.custom_attrs) as Record<string, unknown> })));
+      }
+      if (args.action === "query") {
+        if (args.name == null) return JSON.stringify({ error: "name required for query" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT name, type, custom_attrs FROM items WHERE name = ?",
+          params: [args.name],
+        });
+        if (!res.ok || !res.data) return JSON.stringify(null);
+        const rows = res.data as { name: string; type: string; custom_attrs: string }[];
+        if (!rows[0]) return JSON.stringify(null);
+        return JSON.stringify({ name: rows[0].name, type: rows[0].type, attrs: JSON.parse(rows[0].custom_attrs) as Record<string, unknown> });
+      }
       if (args.action === "create") {
         const summary = `创建物品 "${args.name}"`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
@@ -573,6 +615,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO items (name, type, custom_attrs) VALUES (?, ?, ?)",
           params: [args.name, args.type ?? "", JSON.stringify(args.attrs ?? {})],
         });
+        await db.request({ id: 0, type: "run", sql: "INSERT OR IGNORE INTO kg_nodes (id, type, label) VALUES (?, 'item', ?)", params: [args.name, args.name] });
         return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
@@ -601,18 +644,39 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "faction",
-    description: "势力管理。action: create（B级）创建势力，edit（B级）编辑势力（attrs 合并），delete（C级）删除势力。",
+    description: "势力管理。action: list（A级）列出势力，query（A级）查询单势力，create（B级）创建势力，edit（B级）编辑势力（attrs 合并），delete（C级）删除势力。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：create | edit | delete" },
+        action: { type: "string", description: "操作：list | query | create | edit | delete" },
         name: { type: "string", description: "势力名" },
         description: { type: "string", description: "描述" },
         attrs: { type: "object", description: "自定义属性" },
       },
-      required: ["action", "name"],
+      required: ["action"],
     },
-    fn: async (args: { action: string; name: string; description?: string; attrs?: Record<string, unknown> }) => {
+    fn: async (args: { action: string; name?: string; description?: string; attrs?: Record<string, unknown> }) => {
+      if (args.action === "list") {
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT name, description, custom_attrs FROM factions ORDER BY name",
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        const rows = res.data as { name: string; description: string; custom_attrs: string }[];
+        return JSON.stringify(rows.map(row => ({ name: row.name, description: row.description, attrs: JSON.parse(row.custom_attrs) as Record<string, unknown> })));
+      }
+      if (args.action === "query") {
+        if (args.name == null) return JSON.stringify({ error: "name required for query" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT name, description, custom_attrs FROM factions WHERE name = ?",
+          params: [args.name],
+        });
+        if (!res.ok || !res.data) return JSON.stringify(null);
+        const rows = res.data as { name: string; description: string; custom_attrs: string }[];
+        if (!rows[0]) return JSON.stringify(null);
+        return JSON.stringify({ name: rows[0].name, description: rows[0].description, attrs: JSON.parse(rows[0].custom_attrs) as Record<string, unknown> });
+      }
       if (args.action === "create") {
         const summary = `创建势力 "${args.name}"`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
@@ -623,13 +687,14 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO factions (name, description, custom_attrs) VALUES (?, ?, ?)",
           params: [args.name, args.description ?? "", JSON.stringify(args.attrs ?? {})],
         });
+        await db.request({ id: 0, type: "run", sql: "INSERT OR IGNORE INTO kg_nodes (id, type, label) VALUES (?, 'faction', ?)", params: [args.name, args.name] });
         return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
         const summary = `编辑势力 "${args.name}"`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
         if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
-        if (args.attrs) await mergeAttrs(db, "factions", args.name, args.attrs);
+        if (args.attrs && args.name != null) await mergeAttrs(db, "factions", args.name, args.attrs);
         if (args.description) {
           await db.request({
             id: 0,
@@ -653,18 +718,39 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "location",
-    description: "地点管理。action: create（B级）创建地点，edit（B级）编辑地点（attrs 合并），delete（C级）删除地点。",
+    description: "地点管理。action: list（A级）列出地点，query（A级）查询单地点，create（B级）创建地点，edit（B级）编辑地点（attrs 合并），delete（C级）删除地点。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：create | edit | delete" },
+        action: { type: "string", description: "操作：list | query | create | edit | delete" },
         name: { type: "string", description: "地点名" },
         description: { type: "string", description: "描述" },
         attrs: { type: "object", description: "自定义属性" },
       },
-      required: ["action", "name"],
+      required: ["action"],
     },
-    fn: async (args: { action: string; name: string; description?: string; attrs?: Record<string, unknown> }) => {
+    fn: async (args: { action: string; name?: string; description?: string; attrs?: Record<string, unknown> }) => {
+      if (args.action === "list") {
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT name, description, custom_attrs FROM locations ORDER BY name",
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        const rows = res.data as { name: string; description: string; custom_attrs: string }[];
+        return JSON.stringify(rows.map(row => ({ name: row.name, description: row.description, attrs: JSON.parse(row.custom_attrs) as Record<string, unknown> })));
+      }
+      if (args.action === "query") {
+        if (args.name == null) return JSON.stringify({ error: "name required for query" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT name, description, custom_attrs FROM locations WHERE name = ?",
+          params: [args.name],
+        });
+        if (!res.ok || !res.data) return JSON.stringify(null);
+        const rows = res.data as { name: string; description: string; custom_attrs: string }[];
+        if (!rows[0]) return JSON.stringify(null);
+        return JSON.stringify({ name: rows[0].name, description: rows[0].description, attrs: JSON.parse(rows[0].custom_attrs) as Record<string, unknown> });
+      }
       if (args.action === "create") {
         const summary = `创建地点 "${args.name}"`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
@@ -675,13 +761,14 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO locations (name, description, custom_attrs) VALUES (?, ?, ?)",
           params: [args.name, args.description ?? "", JSON.stringify(args.attrs ?? {})],
         });
+        await db.request({ id: 0, type: "run", sql: "INSERT OR IGNORE INTO kg_nodes (id, type, label) VALUES (?, 'location', ?)", params: [args.name, args.name] });
         return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
         const summary = `编辑地点 "${args.name}"`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
         if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
-        if (args.attrs) await mergeAttrs(db, "locations", args.name, args.attrs);
+        if (args.attrs && args.name != null) await mergeAttrs(db, "locations", args.name, args.attrs);
         if (args.description) {
           await db.request({
             id: 0,
@@ -773,13 +860,13 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "kg",
-    description: "知识图谱管理。action: create_node（B级）创建节点，create_relation（B级）创建关系。",
+    description: "知识图谱管理。action: list_nodes（A级）列出节点，list_relations（A级）列出关系，query_node（A级）查询单节点及关系，create_node（B级）创建节点，create_relation（B级）创建关系。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：create_node | create_relation" },
+        action: { type: "string", description: "操作：list_nodes | list_relations | query_node | create_node | create_relation" },
         id: { type: "string", description: "节点ID" },
-        type: { type: "string", description: "节点/关系类型" },
+        type: { type: "string", description: "节点类型（list_nodes 筛选）或关系类型" },
         label: { type: "string", description: "标签" },
         attrs: { type: "object", description: "属性" },
         source_id: { type: "string", description: "源节点ID" },
@@ -788,6 +875,48 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
       required: ["action"],
     },
     fn: async (args: { action: string; id?: string; type?: string; label?: string; attrs?: Record<string, unknown>; source_id?: string; target_id?: string }) => {
+      if (args.action === "list_nodes") {
+        let sql = "SELECT id, type, label FROM kg_nodes";
+        const params: unknown[] = [];
+        if (args.type) { sql += " WHERE type = ?"; params.push(args.type); }
+        sql += " ORDER BY type, label";
+        const res = await db.request({ id: 0, type: "query", sql, params });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        return JSON.stringify(res.data);
+      }
+      if (args.action === "list_relations") {
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT r.source_id, r.target_id, r.type, n1.label AS source_label, n2.label AS target_label FROM kg_relations r LEFT JOIN kg_nodes n1 ON r.source_id = n1.id LEFT JOIN kg_nodes n2 ON r.target_id = n2.id ORDER BY r.type",
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        return JSON.stringify(res.data);
+      }
+      if (args.action === "query_node") {
+        if (args.id == null) return JSON.stringify({ error: "id required for query_node" });
+        const nodeRes = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, type, label, attrs FROM kg_nodes WHERE id = ?",
+          params: [args.id],
+        });
+        if (!nodeRes.ok || !nodeRes.data) return JSON.stringify(null);
+        const nodeRows = nodeRes.data as { id: string; type: string; label: string; attrs: string }[];
+        if (!nodeRows[0]) return JSON.stringify(null);
+        const node = { ...nodeRows[0], attrs: JSON.parse(nodeRows[0].attrs) as Record<string, unknown> };
+        const outRes = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT target_id AS related_id, type FROM kg_relations WHERE source_id = ?",
+          params: [args.id],
+        });
+        const inRes = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT source_id AS related_id, type FROM kg_relations WHERE target_id = ?",
+          params: [args.id],
+        });
+        const outgoing = (outRes.ok && outRes.data) ? outRes.data as { related_id: string; type: string }[] : [];
+        const incoming = (inRes.ok && inRes.data) ? inRes.data as { related_id: string; type: string }[] : [];
+        return JSON.stringify({ ...node, outgoing, incoming });
+      }
       if (args.action === "create_node") {
         if (args.id == null || args.type == null || args.label == null) return JSON.stringify({ error: "id, type, label required" });
         const summary = `创建知识图谱节点 "${args.id}"`;

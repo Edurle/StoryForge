@@ -430,3 +430,82 @@ describe("List, Query and Insert actions", () => {
     expect(detail.content).toBe("测试脚本");
   });
 });
+
+describe("List query completion", () => {
+  it("timeline list returns array", async () => {
+    const result = JSON.parse(await reg.dispatch("timeline", { action: "list" }));
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("item create and query", async () => {
+    await reg.dispatch("item", { action: "create", name: "测试剑", type: "武器" });
+    const list = JSON.parse(await reg.dispatch("item", { action: "list" }));
+    expect(Array.isArray(list)).toBe(true);
+    const detail = JSON.parse(await reg.dispatch("item", { action: "query", name: "测试剑" }));
+    expect(detail.name).toBe("测试剑");
+    expect(detail.type).toBe("武器");
+  });
+
+  it("faction create and query", async () => {
+    await reg.dispatch("faction", { action: "create", name: "测试宗" });
+    const list = JSON.parse(await reg.dispatch("faction", { action: "list" }));
+    expect(Array.isArray(list)).toBe(true);
+    const detail = JSON.parse(await reg.dispatch("faction", { action: "query", name: "测试宗" }));
+    expect(detail.name).toBe("测试宗");
+  });
+
+  it("location create and query", async () => {
+    await reg.dispatch("location", { action: "create", name: "测试山" });
+    const list = JSON.parse(await reg.dispatch("location", { action: "list" }));
+    expect(Array.isArray(list)).toBe(true);
+    const detail = JSON.parse(await reg.dispatch("location", { action: "query", name: "测试山" }));
+    expect(detail.name).toBe("测试山");
+  });
+
+  it("setting list returns array", async () => {
+    const result = JSON.parse(await reg.dispatch("setting", { action: "list" }));
+    expect(Array.isArray(result)).toBe(true);
+  });
+});
+
+describe("Knowledge graph auto-sync and query", () => {
+  it("character create auto-creates kg_node", async () => {
+    await reg.dispatch("character", { action: "create", name: "图谱角色" });
+    const nodes = JSON.parse(await reg.dispatch("kg", { action: "list_nodes" }));
+    const found = nodes.find((n: { id: string }) => n.id === "图谱角色");
+    expect(found).toBeTruthy();
+    expect(found.type).toBe("character");
+  });
+
+  it("item create auto-creates kg_node", async () => {
+    await reg.dispatch("item", { action: "create", name: "图谱物品", type: "道具" });
+    const nodes = JSON.parse(await reg.dispatch("kg", { action: "list_nodes" }));
+    const found = nodes.find((n: { id: string }) => n.id === "图谱物品");
+    expect(found).toBeTruthy();
+    expect(found.type).toBe("item");
+  });
+
+  it("kg list_nodes with type filter", async () => {
+    const result = JSON.parse(await reg.dispatch("kg", { action: "list_nodes", type: "character" }));
+    expect(Array.isArray(result)).toBe(true);
+    for (const n of result) {
+      expect(n.type).toBe("character");
+    }
+  });
+
+  it("kg list_relations returns array", async () => {
+    const result = JSON.parse(await reg.dispatch("kg", { action: "list_relations" }));
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("kg query_node returns detail with relations", async () => {
+    await reg.dispatch("kg", { action: "create_relation", source_id: "图谱角色", target_id: "图谱物品", type: "持有" });
+    const result = JSON.parse(await reg.dispatch("kg", { action: "query_node", id: "图谱角色" }));
+    expect(result.id).toBe("图谱角色");
+    expect(Array.isArray(result.outgoing)).toBe(true);
+    expect(Array.isArray(result.incoming)).toBe(true);
+    const holdRel = result.outgoing.find((r: { type: string }) => r.type === "持有");
+    expect(holdRel).toBeTruthy();
+    expect(holdRel.related_id).toBe("图谱物品");
+  });
+});
