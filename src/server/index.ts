@@ -144,9 +144,9 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
           pendingUsage = { ...event.usage, costYuan: calcCost(event.usage, model) };
           res.write(`event: usage\ndata: ${JSON.stringify(pendingUsage)}\n\n`);
         } else if (event.type === "assistant") {
-          const msgIdx = loop.getMessages().length - 1;
+          const localIdx = loop.getMessages().length - 1 - seqBefore;
           if (pendingUsage) {
-            usageMap.set(msgIdx, pendingUsage);
+            usageMap.set(localIdx, pendingUsage);
             pendingUsage = undefined;
           }
           res.write(`event: assistant\ndata: ${JSON.stringify({ content: event.content, reasoningContent: event.reasoningContent })}\n\n`);
@@ -171,13 +171,7 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
       const newMessages = allMessages.slice(seqBefore);
       const startSeq = await getNextSeq(db, sessionId);
 
-      const localUsageMap = new Map<number, UsageInfo>();
-      for (const [globalIdx, u] of usageMap) {
-        const localIdx = globalIdx - seqBefore;
-        if (localIdx >= 0) localUsageMap.set(localIdx, u);
-      }
-
-      saveMessages(db, sessionId, newMessages, startSeq, localUsageMap).catch(() => {});
+      saveMessages(db, sessionId, newMessages, startSeq, usageMap).catch(() => {});
       saveSnapshot(db, projectId, sessionId, allMessages, loop.lastPromptTokenCount, wasCompressed ? 1 : 0).catch(() => {});
       cleanOldSnapshots(db, sessionId).catch(() => {});
       touchSession(db, sessionId).catch(() => {});
