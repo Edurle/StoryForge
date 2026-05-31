@@ -28,6 +28,19 @@ export async function saveMessages(
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]!;
     const usage = usageMap?.get(i);
+    let toolCallsJson = JSON.stringify(m.tool_calls ?? []);
+    if (m.role === "tool" && m.tool_call_id) {
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = messages[j]!;
+        if (prev.role === "assistant" && prev.tool_calls?.length) {
+          const match = prev.tool_calls.find(tc => tc.id === m.tool_call_id);
+          if (match) {
+            toolCallsJson = JSON.stringify({ name: match.function.name, arguments: match.function.arguments });
+          }
+          break;
+        }
+      }
+    }
     await w.request({
       id: 0,
       type: "run",
@@ -37,7 +50,7 @@ export async function saveMessages(
         i,
         m.role,
         m.content ?? "",
-        JSON.stringify(m.tool_calls ?? []),
+        toolCallsJson,
         m.tool_call_id ?? "",
         m.reasoning_content ?? "",
         usage ? JSON.stringify(usage) : "",

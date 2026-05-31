@@ -190,6 +190,22 @@ function usagePercent(u: UsageInfo): string {
   return ((u.cacheHitTokens / total) * 100).toFixed(1);
 }
 
+function formatToolCall(name: string, argsStr: string): string {
+  try {
+    const args = JSON.parse(argsStr);
+    const pairs = Object.entries(args).map(([k, v]) => `${k}: ${JSON.stringify(v)}`);
+    const joined = pairs.join(", ");
+    return `🔧 ${name}(${joined.length > 200 ? joined.slice(0, 200) + "…" : joined})`;
+  } catch {
+    return `🔧 ${name}(${argsStr.length > 200 ? argsStr.slice(0, 200) + "…" : argsStr})`;
+  }
+}
+
+function formatToolResult(result: string): string {
+  const display = result.length > 200 ? result.slice(0, 200) + "…" : result;
+  return `  → ${display}`;
+}
+
 function renderMarkdown(text: string): string {
   return marked.parse(text, { async: false }) as string;
 }
@@ -225,12 +241,15 @@ async function loadHistory() {
           content: m.role === "tool" ? m.content : m.content,
         };
         if (m.role === "tool") {
+          let toolDisplay = m.content;
           try {
-            const parsed = JSON.parse(m.content);
-            display.content = parsed.name ? `${parsed.name}: ${parsed.result ?? parsed.content}` : m.content;
-          } catch {
-            display.content = m.content;
-          }
+            const callInfo = JSON.parse(m.toolCalls) as { name?: string; arguments?: string };
+            if (callInfo.name) {
+              toolDisplay = formatToolCall(callInfo.name, callInfo.arguments ?? "{}");
+              toolDisplay += "\n" + formatToolResult(m.content);
+            }
+          } catch {}
+          display.content = toolDisplay;
         }
         if (m.role === "assistant" && m.reasoningContent) {
           display.reasoningContent = m.reasoningContent;
@@ -300,10 +319,20 @@ async function send() {
       }
       lastUsage = undefined;
       scrollToBottom();
+    } else if (event.type === "tool_call") {
+      pendingMsg = undefined;
+      const data = event.data as { name: string; args: string };
+      messages.value.push({ role: "tool", content: formatToolCall(data.name, data.args) });
+      scrollToBottom();
     } else if (event.type === "tool_result") {
       pendingMsg = undefined;
       const data = event.data as { name: string; result: string };
-      messages.value.push({ role: "tool", content: `${data.name}: ${data.result}` });
+      const lastTool = [...messages.value].reverse().find(m => m.role === "tool" && m.content.startsWith("🔧"));
+      if (lastTool) {
+        lastTool.content += "\n" + formatToolResult(data.result);
+      } else {
+        messages.value.push({ role: "tool", content: formatToolResult(data.result) });
+      }
       scrollToBottom();
     } else if (event.type === "gate_request") {
       const data = event.data as { id: number; kind: string; payload: unknown };
@@ -312,6 +341,14 @@ async function send() {
       } else {
         gateRequest.value = data;
       }
+    } else if (event.type === "compressed") {
+      const data = event.data as { beforeTokens: number; afterTokens: number; summaryLevels: number };
+      pendingMsg = undefined;
+      messages.value.push({
+        role: "tool",
+        content: `📦 上下文已压缩: ${(data.beforeTokens / 1000).toFixed(0)}k → ${(data.afterTokens / 1000).toFixed(0)}k tokens (${data.summaryLevels}级摘要)`,
+      });
+      scrollToBottom();
     } else if (event.type === "done") {
       pendingMsg = undefined;
       sending.value = false;

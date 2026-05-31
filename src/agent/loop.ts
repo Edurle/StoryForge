@@ -33,7 +33,30 @@ export type EngineEvent =
   | { type: "usage"; usage: UsageInfo }
   | { type: "done"; content: string }
   | { type: "error"; error: Error }
-  | { type: "aborted" };
+  | { type: "aborted" }
+  | { type: "compressed"; beforeTokens: number; afterTokens: number; summaryLevels: number };
+
+const COMPRESS_THRESHOLD = 200_000;
+const KEEP_RECENT_TURNS = 8;
+
+function collectTurnBoundaries(messages: readonly ChatMessage[]): number[] {
+  const boundaries: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i]!.role === "user") boundaries.push(i);
+  }
+  return boundaries;
+}
+
+function messagesToText(messages: readonly ChatMessage[]): string {
+  return messages.map(m => {
+    if (m.role === "tool") return `[tool:${m.tool_call_id ?? ""}] ${m.content}`;
+    if (m.role === "assistant" && m.tool_calls?.length) {
+      const calls = m.tool_calls.map(tc => `${tc.function.name}(${tc.function.arguments})`).join("; ");
+      return `[assistant+tools] ${m.content ?? ""}\n[calls] ${calls}`;
+    }
+    return `[${m.role}] ${m.content}`;
+  }).join("\n\n");
+}
 
 export interface StoryForgeLoopDeps {
   client: {
@@ -55,6 +78,7 @@ export class StoryForgeLoop {
   private readonly model: string;
   private readonly abortController = new AbortController();
   private readonly messages: ChatMessage[];
+  private lastPromptTokens = 0;
 
   constructor(deps: StoryForgeLoopDeps) {
     this.client = deps.client;
@@ -86,6 +110,8 @@ export class StoryForgeLoop {
         return;
       }
 
+      this.lastPromptTokens = response.usage.promptTokens;
+
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: response.content,
@@ -113,6 +139,10 @@ export class StoryForgeLoop {
       };
 
       if (response.toolCalls.length === 0) {
+        if (this.lastPromptTokens > COMPRESS_THRESHOLD) {
+          const evt = await this.compressMessages();
+          if (evt) yield evt;
+        }
         yield { type: "done", content: response.content };
         return;
       }
@@ -134,6 +164,69 @@ export class StoryForgeLoop {
     }
 
     yield { type: "done", content: "" };
+  }
+
+  private async compressMessages(): Promise<EngineEvent | null> {
+    const beforeTokens = this.lastPromptTokens;
+    const boundaries = collectTurnBoundaries(this.messages);
+    if (boundaries.length <= KEEP_RECENT_TURNS) return null;
+
+    const recentStart = boundaries[boundaries.length - KEEP_RECENT_TURNS]!;
+    if (recentStart <= 2) return null;
+
+    const oldMessages = this.messages.slice(0, recentStart);
+    const recentMessages = this.messages.slice(recentStart);
+
+    const midPoint = Math.floor(oldMessages.length / 2);
+    const ancient = oldMessages.slice(0, midPoint);
+    const middle = oldMessages.slice(midPoint);
+
+    const summaries: string[] = [];
+
+    if (ancient.length > 0) {
+      const rough = await this.generateSummary(
+        messagesToText(ancient),
+        "请将以下对话历史压缩为一段简短摘要（500字以内），保留关键事件、决策、角色状态变化和重要数值。忽略工具调用的技术细节，只保留结果。",
+      );
+      summaries.push(`[前情提要·早期]\n${rough}`);
+    }
+
+    if (middle.length > 0) {
+      const detailed = await this.generateSummary(
+        messagesToText(middle),
+        "请将以下对话历史压缩为详细摘要（2000字以内），保留重要细节、数值变化、因果关系、角色状态。忽略工具调用的技术细节，只保留结果。",
+      );
+      summaries.push(`[前情提要·近期]\n${detailed}`);
+    }
+
+    const summaryContent = summaries.join("\n\n");
+    const compressedMessages: ChatMessage[] = [
+      { role: "user", content: `[系统自动压缩的上下文摘要]\n\n${summaryContent}` },
+      { role: "assistant", content: "已了解前情提要，我会基于以上上下文继续创作。" },
+      ...recentMessages,
+    ];
+
+    this.messages.length = 0;
+    this.messages.push(...compressedMessages);
+    this.lastPromptTokens = 0;
+
+    const summaryLevels = (ancient.length > 0 ? 1 : 0) + (middle.length > 0 ? 1 : 0);
+    return { type: "compressed", beforeTokens, afterTokens: 0, summaryLevels };
+  }
+
+  private async generateSummary(text: string, instruction: string): Promise<string> {
+    try {
+      const resp = await this.client.chat({
+        model: this.model,
+        messages: [
+          { role: "system", content: "你是一个对话摘要助手。根据用户提供的对话历史，生成简洁准确的摘要。" },
+          { role: "user", content: `${instruction}\n\n---\n\n${text}` },
+        ],
+      });
+      return resp.content || "";
+    } catch {
+      return "[摘要生成失败]";
+    }
   }
 
   getMessages(): readonly ChatMessage[] {

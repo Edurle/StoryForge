@@ -157,6 +157,8 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
           res.write(`event: tool_result\ndata: ${JSON.stringify({ name: event.call.function.name, result: event.result })}\n\n`);
         } else if (event.type === "done") {
           res.write(`event: done\ndata: ${JSON.stringify({ content: event.content })}\n\n`);
+        } else if (event.type === "compressed") {
+          res.write(`event: compressed\ndata: ${JSON.stringify({ beforeTokens: event.beforeTokens, afterTokens: event.afterTokens, summaryLevels: event.summaryLevels })}\n\n`);
         } else if (event.type === "error") {
           res.write(`event: error\ndata: ${JSON.stringify({ error: event.error.message })}\n\n`);
         }
