@@ -8,6 +8,17 @@ export interface UsageInfo {
   completionTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  costYuan?: number;
+}
+
+export function calcCost(usage: UsageInfo, model: string): number {
+  const cacheHitPerM = model.includes("pro") ? 0.025 : 0.02;
+  const cacheMissPerM = model.includes("pro") ? 3 : 1;
+  const outputPerM = model.includes("pro") ? 6 : 2;
+  const hit = (usage.cacheHitTokens / 1_000_000) * cacheHitPerM;
+  const miss = (usage.cacheMissTokens / 1_000_000) * cacheMissPerM;
+  const out = (usage.completionTokens / 1_000_000) * outputPerM;
+  return hit + miss + out;
 }
 
 export interface StreamDeltaEvent {

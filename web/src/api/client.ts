@@ -26,6 +26,7 @@ export const api = {
     totalPromptTokens: number;
     totalCompletionTokens: number;
     totalCacheHitTokens: number;
+    totalCostYuan: number;
   }> {
     const res = await fetch(`${BASE}/${projectId}/usage`);
     return res.json();

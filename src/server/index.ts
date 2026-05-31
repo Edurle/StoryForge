@@ -4,6 +4,7 @@ import type { Request, Response } from "express";
 import type { DbWorker } from "../db/worker.js";
 import type { StoryForgeLoop } from "../agent/loop.js";
 import type { UsageInfo } from "../agent/loop.js";
+import { calcCost } from "../agent/loop.js";
 import type { StreamDeltaEvent } from "../agent/loop.js";
 import type { PauseGate } from "../../lib/reasonix-core/core/pause-gate.js";
 import { errorHandler } from "./middleware/error.js";
@@ -141,8 +142,8 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     try {
       for await (const event of loop.runTurn(message)) {
         if (event.type === "usage") {
-          pendingUsage = event.usage;
-          res.write(`event: usage\ndata: ${JSON.stringify(event.usage)}\n\n`);
+          pendingUsage = { ...event.usage, costYuan: calcCost(event.usage, model) };
+          res.write(`event: usage\ndata: ${JSON.stringify(pendingUsage)}\n\n`);
         } else if (event.type === "assistant") {
           const msgIdx = loop.getMessages().length - 1;
           if (pendingUsage) {

@@ -4,7 +4,15 @@
       <router-link to="/" class="back-link">← 返回</router-link>
       <span class="project-name">{{ projectStore.currentName }}</span>
       <span class="usage-stats" v-if="usage.totalCalls > 0">
-        📊 {{ usage.totalCalls }}次 · {{ ((usage.totalPromptTokens + usage.totalCompletionTokens) / 1000).toFixed(1) }}k tokens
+        📊 {{ usage.totalCalls }}次
+        · 输入 {{ (usage.totalPromptTokens / 1000).toFixed(1) }}k
+        · 输出 {{ (usage.totalCompletionTokens / 1000).toFixed(1) }}k
+        · 缓存 {{ cachePercent }}%
+        · ¥{{ usage.totalCostYuan.toFixed(4) }}
+        <span class="ctx-bar" v-if="lastContextTokens > 0">
+          <span class="ctx-fill" :class="ctxClass" :style="{ width: ctxPercent + '%' }"></span>
+        </span>
+        <span class="ctx-label" v-if="lastContextTokens > 0">{{ (lastContextTokens / 1000).toFixed(0) }}k/1M</span>
       </span>
       <label class="auto-approve-toggle">
         <input type="checkbox" v-model="autoApproveB" />
@@ -51,6 +59,7 @@
                 <div v-if="msg.usage" class="bubble-usage">
                   输入 {{ msg.usage.promptTokens }} · 输出 {{ msg.usage.completionTokens }}
                   · 缓存 {{ usagePercent(msg.usage) }}%
+                  · ¥{{ (msg.usage.costYuan ?? 0).toFixed(4) }}
                 </div>
               </div>
             </div>
@@ -118,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from "vue";
+import { ref, computed, onMounted, nextTick } from "vue";
 import { useLayoutStore } from "@/stores/layout.js";
 import { useProjectStore } from "@/stores/project.js";
 import { api } from "@/api/client.js";
@@ -129,6 +138,7 @@ interface UsageInfo {
   completionTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  costYuan?: number;
 }
 
 interface DisplayMessage {
@@ -147,7 +157,7 @@ const sending = ref(false);
 const messages = ref<DisplayMessage[]>([]);
 const systemPrompt = ref("");
 const showSystemPrompt = ref(false);
-const usage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0 });
+const usage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 });
 const messagesContainer = ref<HTMLElement | null>(null);
 const currentModel = ref("deepseek-v4-flash");
 const currentThinking = ref("enabled");
@@ -157,6 +167,22 @@ const kbTabs = ["全部", "角色", "设定", "时间线", "公式"];
 const autoApproveB = ref(false);
 const gateRequest = ref<{ id: number; kind: string; payload: unknown } | null>(null);
 let lastUsage: UsageInfo | undefined;
+const lastContextTokens = ref(0);
+
+const cachePercent = computed(() => {
+  if (usage.value.totalPromptTokens === 0) return "0";
+  return ((usage.value.totalCacheHitTokens / usage.value.totalPromptTokens) * 100).toFixed(1);
+});
+
+const ctxPercent = computed(() => {
+  return Math.min(100, (lastContextTokens.value / 1_000_000) * 100);
+});
+
+const ctxClass = computed(() => {
+  if (ctxPercent.value > 80) return "ctx-red";
+  if (ctxPercent.value > 50) return "ctx-yellow";
+  return "ctx-green";
+});
 
 function usagePercent(u: UsageInfo): string {
   const total = u.cacheHitTokens + u.cacheMissTokens;
@@ -260,6 +286,7 @@ async function send() {
       scrollToBottom();
     } else if (event.type === "usage") {
       lastUsage = event.data as UsageInfo;
+      lastContextTokens.value = lastUsage.promptTokens;
     } else if (event.type === "assistant") {
       const data = event.data as { content: string; reasoningContent?: string };
       if (pendingMsg) {
@@ -369,6 +396,30 @@ header {
   cursor: pointer;
 }
 .auto-approve-toggle:hover { color: #6b7280; }
+.ctx-bar {
+  display: inline-block;
+  width: 80px;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-left: 0.3rem;
+}
+.ctx-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s, background 0.3s;
+}
+.ctx-green { background: #22c55e; }
+.ctx-yellow { background: #eab308; }
+.ctx-red { background: #ef4444; }
+.ctx-label {
+  font-size: 0.65rem;
+  color: #b0b8c4;
+  margin-left: 0.2rem;
+}
 header button {
   padding: 0.25rem 0.6rem;
   border: 1px solid #e5e7eb;
