@@ -12,8 +12,9 @@ import { recordUsage } from "../services/usage.js";
 import { DeepSeekClient, Usage } from "../../lib/reasonix-core/client.js";
 import { getActiveSession, createSession, loadSnapshot, saveSnapshot } from "../services/history.js";
 import { createApp } from "./index.js";
+import { createLogger } from "./logger.js";
 import { randomUUID } from "node:crypto";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +37,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = resolve(__dirname, "../../data");
 
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+
+const logger = createLogger(join(dataDir, "logs"));
+const origLog = console.log;
+const origError = console.error;
+console.log = (...args: unknown[]) => { origLog(...args); logger.log(args.map(String).join(" ")); };
+console.error = (...args: unknown[]) => { origError(...args); logger.error(args.map(String).join(" ")); };
 
 const workers = new Map<string, ReturnType<typeof createDbWorker>>();
 const gate = new PauseGate();

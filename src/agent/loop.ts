@@ -109,9 +109,11 @@ export class StoryForgeLoop {
 
       let response: ChatResponse;
       try {
+        const contextMessages = [...this.prefix.toMessages(), ...this.messages];
+        console.log(`[Loop] Sending ${contextMessages.length} messages to LLM (model=${model}, snapshot=${this.messages.length} msgs, prefix=${this.prefix.toMessages().length} msgs)`);
         response = await this.client.chat({
           model,
-          messages: [...this.prefix.toMessages(), ...this.messages],
+          messages: contextMessages,
           tools: this.prefix.tools(),
           thinking: opts?.thinking,
           reasoningEffort: opts?.reasoningEffort,

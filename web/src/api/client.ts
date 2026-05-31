@@ -105,4 +105,8 @@ export const api = {
       body: JSON.stringify(verdict),
     });
   },
+  async getKnowledge<T = unknown>(projectId: string, entity: string): Promise<T> {
+    const res = await fetch(`${BACKEND}/${projectId}/knowledge/${entity}`);
+    return res.json();
+  },
 };

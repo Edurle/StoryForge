@@ -12,6 +12,7 @@ import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { getUsageSummary, getCompressUsageSummary } from "../services/usage.js";
 import { recordUsage } from "../services/usage.js";
 import { loadHistory, saveMessages, saveSnapshot, cleanOldSnapshots, getNextSeq, touchSession } from "../services/history.js";
+import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations } from "../services/knowledge.js";
 
 export interface ServerDeps {
   getDbWorker: (projectId: string) => DbWorker;
@@ -238,6 +239,48 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
 
   app.get("/api/projects/:projectId/content/{*path}", (_req, res) => {
     res.status(404).json({ error: "Content not found" });
+  });
+
+  app.get("/api/projects/:projectId/knowledge/characters", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryCharacters(db));
+  });
+
+  app.get("/api/projects/:projectId/knowledge/settings", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryAllSettings(db));
+  });
+
+  app.get("/api/projects/:projectId/knowledge/formulas", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryFormulas(db));
+  });
+
+  app.get("/api/projects/:projectId/knowledge/timeline", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryAllTimeline(db));
+  });
+
+  app.get("/api/projects/:projectId/knowledge/items", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryItems(db));
+  });
+
+  app.get("/api/projects/:projectId/knowledge/factions", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryFactions(db));
+  });
+
+  app.get("/api/projects/:projectId/knowledge/locations", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryLocations(db));
   });
 
   app.use(errorHandler);

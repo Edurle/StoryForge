@@ -40,6 +40,48 @@
             </button>
             <pre v-if="showSystemPrompt" class="system-prompt-content">{{ systemPrompt }}</pre>
           </div>
+          <div class="kb-cards">
+            <template v-if="activeKbTab === '全部' || activeKbTab === '角色'">
+              <div v-for="c in kbData.characters" :key="'c-'+c.name" class="kb-card" @click="activeKbTab = '角色'">
+                <div class="kb-card-header"><span class="kb-card-name">{{ c.name }}</span><span class="kb-card-badge">{{ c.stage }}</span></div>
+                <div class="kb-card-attrs"><span v-for="(v, k) in c.attrs" :key="k" class="kb-attr">{{ k }}: {{ v }}</span></div>
+              </div>
+            </template>
+            <template v-if="activeKbTab === '全部' || activeKbTab === '设定'">
+              <div v-for="s in kbData.settings" :key="'s-'+s.topic" class="kb-card">
+                <div class="kb-card-header"><span class="kb-card-name">{{ s.topic }}</span></div>
+                <div class="kb-card-content">{{ s.content }}</div>
+              </div>
+            </template>
+            <template v-if="activeKbTab === '全部' || activeKbTab === '时间线'">
+              <div v-for="t in kbData.timeline" :key="'t-'+t.id" class="kb-card">
+                <div class="kb-card-header"><span class="kb-card-name">{{ t.time }}</span></div>
+                <div class="kb-card-content">{{ t.description }}</div>
+                <div class="kb-card-attrs"><span v-for="ch in t.characters" :key="ch" class="kb-attr">{{ ch }}</span></div>
+              </div>
+            </template>
+            <template v-if="activeKbTab === '全部' || activeKbTab === '公式'">
+              <div v-for="f in kbData.formulas" :key="'f-'+f.name" class="kb-card">
+                <div class="kb-card-header"><span class="kb-card-name">{{ f.name }}</span></div>
+                <div class="kb-card-content">{{ f.template }}</div>
+              </div>
+            </template>
+            <template v-if="activeKbTab === '全部'">
+              <div v-for="it in kbData.items" :key="'i-'+it.name" class="kb-card">
+                <div class="kb-card-header"><span class="kb-card-name">{{ it.name }}</span><span class="kb-card-badge">{{ it.type }}</span></div>
+                <div class="kb-card-attrs"><span v-for="(v, k) in it.attrs" :key="k" class="kb-attr">{{ k }}: {{ v }}</span></div>
+              </div>
+              <div v-for="fa in kbData.factions" :key="'fa-'+fa.name" class="kb-card">
+                <div class="kb-card-header"><span class="kb-card-name">{{ fa.name }}</span></div>
+                <div class="kb-card-content">{{ fa.description }}</div>
+              </div>
+              <div v-for="lo in kbData.locations" :key="'lo-'+lo.name" class="kb-card">
+                <div class="kb-card-header"><span class="kb-card-name">{{ lo.name }}</span></div>
+                <div class="kb-card-content">{{ lo.description }}</div>
+              </div>
+            </template>
+            <div v-if="isKbEmpty" class="kb-empty">暂无数据</div>
+          </div>
         </div>
       </aside>
       <main class="center">
@@ -168,6 +210,39 @@ const currentThinking = ref("enabled");
 const currentEffort = ref("high");
 const activeKbTab = ref("全部");
 const kbTabs = ["全部", "角色", "设定", "时间线", "公式"];
+const kbData = ref<{
+  characters: Array<{ name: string; stage: string; attrs: Record<string, unknown> }>;
+  settings: Array<{ topic: string; content: string }>;
+  timeline: Array<{ id: string; time: string; description: string; characters: string[] }>;
+  formulas: Array<{ name: string; template: string; vars: string }>;
+  items: Array<{ name: string; type: string; attrs: Record<string, unknown> }>;
+  factions: Array<{ name: string; description: string; attrs: Record<string, unknown> }>;
+  locations: Array<{ name: string; description: string; attrs: Record<string, unknown> }>;
+}>({ characters: [], settings: [], timeline: [], formulas: [], items: [], factions: [], locations: [] });
+
+const isKbEmpty = computed(() => {
+  const d = kbData.value;
+  if (activeKbTab.value === "角色") return d.characters.length === 0;
+  if (activeKbTab.value === "设定") return d.settings.length === 0;
+  if (activeKbTab.value === "时间线") return d.timeline.length === 0;
+  if (activeKbTab.value === "公式") return d.formulas.length === 0;
+  return d.characters.length + d.settings.length + d.timeline.length + d.formulas.length + d.items.length + d.factions.length + d.locations.length === 0;
+});
+
+async function loadKnowledge() {
+  try {
+    const [characters, settings, formulas, timeline, items, factions, locations] = await Promise.all([
+      api.getKnowledge<typeof kbData.value.characters>(props.id, "characters"),
+      api.getKnowledge<typeof kbData.value.settings>(props.id, "settings"),
+      api.getKnowledge<typeof kbData.value.formulas>(props.id, "formulas"),
+      api.getKnowledge<typeof kbData.value.timeline>(props.id, "timeline"),
+      api.getKnowledge<typeof kbData.value.items>(props.id, "items"),
+      api.getKnowledge<typeof kbData.value.factions>(props.id, "factions"),
+      api.getKnowledge<typeof kbData.value.locations>(props.id, "locations"),
+    ]);
+    kbData.value = { characters, settings, formulas, timeline, items, factions, locations };
+  } catch {}
+}
 const autoApproveB = ref(false);
 const gateRequest = ref<{ id: number; kind: string; payload: unknown } | null>(null);
 let lastUsage: UsageInfo | undefined;
@@ -272,12 +347,13 @@ async function loadHistory() {
   } catch {}
 }
 
-onMounted(() => {
+ onMounted(() => {
   layout.loadFromStorage();
   projectStore.setCurrent(props.id);
   loadSystemPrompt();
   loadUsage();
   loadHistory();
+  loadKnowledge();
 });
 
 async function send() {
@@ -359,6 +435,7 @@ async function send() {
       pendingMsg = undefined;
       sending.value = false;
       loadUsage();
+      loadKnowledge();
     } else if (event.type === "error") {
       pendingMsg = undefined;
       const data = event.data as { error: string };
@@ -561,6 +638,43 @@ header button:hover { background: #f3f4f6; color: #374151; }
   max-height: 400px;
   overflow-y: auto;
 }
+
+.kb-cards { padding: 0.4rem 0; }
+.kb-card {
+  margin: 0.4rem 0.6rem;
+  padding: 0.5rem 0.6rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  cursor: default;
+}
+.kb-card:hover { border-color: #d1d5db; }
+.kb-card-header { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem; }
+.kb-card-name { font-weight: 600; color: #111827; }
+.kb-card-badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-radius: 3px;
+}
+.kb-card-attrs { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.kb-attr {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.3rem;
+  background: #f3f4f6;
+  border-radius: 3px;
+  color: #4b5563;
+}
+.kb-card-content {
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 80px;
+  overflow: hidden;
+}
+.kb-empty { text-align: center; color: #9ca3af; padding: 2rem 0; font-size: 0.82rem; }
 
 /* ===== CENTER: 聊天 ===== */
 .center {
