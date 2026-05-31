@@ -112,13 +112,13 @@ export async function validateCharacterConsistency(
   const relRes = await w.request({
     id: 0,
     type: "query",
-    sql: "SELECT source_id, target_id FROM kg_relations",
+    sql: `SELECT r.source_id, r.target_id FROM kg_relations r JOIN kg_nodes n ON r.source_id = n.id WHERE n.type = 'character' AND r.target_id NOT IN (SELECT name FROM characters)`,
   });
   if (relRes.ok && relRes.data) {
     const rows = relRes.data as { source_id: string; target_id: string }[];
     const reported = new Set<string>();
     for (const row of rows) {
-      if (!charNames.has(row.target_id) && !reported.has(row.target_id)) {
+      if (!reported.has(row.target_id)) {
         reported.add(row.target_id);
         issues.push({
           type: "missing_character_ref",
