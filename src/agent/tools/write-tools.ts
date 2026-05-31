@@ -98,14 +98,6 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         }
         return JSON.stringify({ success: true });
       }
-      if (args.action === "delete") {
-        if (!args.name) return JSON.stringify({ error: "name required for delete" });
-        const summary = `删除角色 "${args.name}"`;
-        const verdict = await gate.ask({ kind: "plan_checkpoint", payload: { stepId: "delete_character", result: summary } });
-        if (verdict.type !== "continue") return JSON.stringify({ cancelled: true });
-        await db.request({ id: 0, type: "run", sql: "DELETE FROM characters WHERE name = ?", params: [args.name] });
-        return JSON.stringify({ success: true });
-      }
       return JSON.stringify({ error: `unknown action: ${args.action}` });
     },
   });
@@ -860,11 +852,11 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "kg",
-    description: "知识图谱管理。action: list_nodes（A级）列出节点，list_relations（A级）列出关系，query_node（A级）查询单节点及关系，create_node（B级）创建节点，create_relation（B级）创建关系。",
+    description: "知识图谱管理。action: list_nodes（A级）列出节点，list_relations（A级）列出关系，query_node（A级）查询单节点及关系，create_node（B级）创建节点，create_relation（B级）创建关系，delete_node（C级）删除节点及关系，delete_relation（C级）删除关系。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：list_nodes | list_relations | query_node | create_node | create_relation" },
+        action: { type: "string", description: "操作：list_nodes | list_relations | query_node | create_node | create_relation | delete_node | delete_relation" },
         id: { type: "string", description: "节点ID" },
         type: { type: "string", description: "节点类型（list_nodes 筛选）或关系类型" },
         label: { type: "string", description: "标签" },
@@ -941,6 +933,23 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO kg_relations (source_id, target_id, type, attrs) VALUES (?, ?, ?, ?)",
           params: [args.source_id, args.target_id, args.type, JSON.stringify(args.attrs ?? {})],
         });
+        return JSON.stringify({ success: true });
+      }
+      if (args.action === "delete_node") {
+        if (args.id == null) return JSON.stringify({ error: "id required for delete_node" });
+        const summary = `删除知识图谱节点 "${args.id}" 及其关系`;
+        const verdict = await gate.ask({ kind: "plan_checkpoint", payload: { stepId: "delete_kg_node", result: summary } });
+        if (verdict.type !== "continue") return JSON.stringify({ cancelled: true });
+        await db.request({ id: 0, type: "run", sql: "DELETE FROM kg_relations WHERE source_id = ? OR target_id = ?", params: [args.id, args.id] });
+        await db.request({ id: 0, type: "run", sql: "DELETE FROM kg_nodes WHERE id = ?", params: [args.id] });
+        return JSON.stringify({ success: true });
+      }
+      if (args.action === "delete_relation") {
+        if (args.source_id == null || args.target_id == null || args.type == null) return JSON.stringify({ error: "source_id, target_id, type required" });
+        const summary = `删除关系 ${args.source_id} → ${args.target_id} (${args.type})`;
+        const verdict = await gate.ask({ kind: "plan_checkpoint", payload: { stepId: "delete_kg_relation", result: summary } });
+        if (verdict.type !== "continue") return JSON.stringify({ cancelled: true });
+        await db.request({ id: 0, type: "run", sql: "DELETE FROM kg_relations WHERE source_id = ? AND target_id = ? AND type = ?", params: [args.source_id, args.target_id, args.type] });
         return JSON.stringify({ success: true });
       }
       return JSON.stringify({ error: `unknown action: ${args.action}` });

@@ -12,7 +12,7 @@ import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { getUsageSummary, getCompressUsageSummary } from "../services/usage.js";
 import { recordUsage } from "../services/usage.js";
 import { loadHistory, saveMessages, saveSnapshot, cleanOldSnapshots, getNextSeq, touchSession } from "../services/history.js";
-import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations, queryChapters, queryChapterContent } from "../services/knowledge.js";
+import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations, queryChapters, queryChapterContent, queryKgGraph } from "../services/knowledge.js";
 
 export interface ServerDeps {
   getDbWorker: (projectId: string) => DbWorker;
@@ -303,6 +303,12 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     const projectId = (_req.params as Record<string, string | undefined>).projectId!;
     const db = deps.getDbWorker(projectId);
     res.json(await queryLocations(db));
+  });
+
+  app.get("/api/projects/:projectId/knowledge/graph", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryKgGraph(db));
   });
 
   app.use(errorHandler);

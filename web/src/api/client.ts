@@ -122,4 +122,11 @@ export const api = {
   getExportUrl(projectId: string): string {
     return `${BACKEND}/${projectId}/export`;
   },
+  async getKnowledgeGraph(projectId: string): Promise<{
+    nodes: Array<{ id: string; type: string; label: string }>;
+    edges: Array<{ source_id: string; target_id: string; type: string; source_label: string; target_label: string }>;
+  }> {
+    const res = await fetch(`${BACKEND}/${projectId}/knowledge/graph`);
+    return res.json();
+  },
 };

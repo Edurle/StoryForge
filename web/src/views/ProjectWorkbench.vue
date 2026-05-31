@@ -41,6 +41,12 @@
               </div>
             </div>
           </template>
+          <template v-else-if="activeKbTab === '关系图'">
+            <div v-if="graphData.nodes.length > 0" class="kb-cards">
+              <RelationGraph :nodes="graphNodes" :edges="graphEdges" :width="340" :height="300" />
+            </div>
+            <div v-else class="kb-empty">暂无关系数据</div>
+          </template>
           <template v-else>
             <div class="kb-cards">
               <template v-if="activeKbTab === '全部' || activeKbTab === '角色'">
@@ -185,6 +191,7 @@ import { useLayoutStore } from "@/stores/layout.js";
 import { useProjectStore } from "@/stores/project.js";
 import { api } from "@/api/client.js";
 import { marked } from "marked";
+import RelationGraph from "@/components/RelationGraph.vue";
 
 interface UsageInfo {
   promptTokens: number;
@@ -220,7 +227,7 @@ const chapters = ref<Array<{ id: number; volume: number; title: string; status: 
 const selectedChapterId = ref<number | null>(null);
 const chapterContent = ref("");
 const chapterLoading = ref(false);
-const kbTabs = ["全部", "角色", "设定", "时间线", "公式", "提示词"];
+const kbTabs = ["全部", "角色", "设定", "时间线", "公式", "关系图", "提示词"];
 const kbData = ref<{
   characters: Array<{ name: string; stage: string; attrs: Record<string, unknown> }>;
   settings: Array<{ topic: string; content: string }>;
@@ -230,6 +237,10 @@ const kbData = ref<{
   factions: Array<{ name: string; description: string; attrs: Record<string, unknown> }>;
   locations: Array<{ name: string; description: string; attrs: Record<string, unknown> }>;
 }>({ characters: [], settings: [], timeline: [], formulas: [], items: [], factions: [], locations: [] });
+const graphData = ref<{ nodes: Array<{ id: string; type: string; label: string }>; edges: Array<{ source_id: string; target_id: string; type: string; source_label: string; target_label: string }> }>({ nodes: [], edges: [] });
+
+const graphNodes = computed(() => graphData.value.nodes.map(n => ({ id: n.id, label: n.label, group: n.type })));
+const graphEdges = computed(() => graphData.value.edges.map(e => ({ source: e.source_id, target: e.target_id, type: e.type })));
 
 const isKbEmpty = computed(() => {
   const d = kbData.value;
@@ -248,7 +259,7 @@ function chaptersByVolume(vol: number) {
 
 async function loadKnowledge() {
   try {
-    const [characters, settings, formulas, timeline, items, factions, locations] = await Promise.all([
+    const [characters, settings, formulas, timeline, items, factions, locations, graph] = await Promise.all([
       api.getKnowledge<typeof kbData.value.characters>(props.id, "characters"),
       api.getKnowledge<typeof kbData.value.settings>(props.id, "settings"),
       api.getKnowledge<typeof kbData.value.formulas>(props.id, "formulas"),
@@ -256,8 +267,10 @@ async function loadKnowledge() {
       api.getKnowledge<typeof kbData.value.items>(props.id, "items"),
       api.getKnowledge<typeof kbData.value.factions>(props.id, "factions"),
       api.getKnowledge<typeof kbData.value.locations>(props.id, "locations"),
+      api.getKnowledgeGraph(props.id),
     ]);
     kbData.value = { characters, settings, formulas, timeline, items, factions, locations };
+    graphData.value = graph;
   } catch {}
 }
 

@@ -249,3 +249,40 @@ export async function queryChapterContent(w: DbWorker, chapterId: number): Promi
   const rows = res.data as { content: string }[];
   return rows.map(row => row.content).join("\n\n");
 }
+
+export interface KgNodeRow {
+  id: string;
+  type: string;
+  label: string;
+}
+
+export interface KgRelationRow {
+  source_id: string;
+  target_id: string;
+  type: string;
+  source_label: string;
+  target_label: string;
+}
+
+export async function queryKgNodes(w: DbWorker): Promise<KgNodeRow[]> {
+  const res = await w.request({
+    id: 0, type: "query",
+    sql: "SELECT id, type, label FROM kg_nodes ORDER BY type, label",
+  });
+  if (!res.ok || !res.data) return [];
+  return res.data as KgNodeRow[];
+}
+
+export async function queryKgRelations(w: DbWorker): Promise<KgRelationRow[]> {
+  const res = await w.request({
+    id: 0, type: "query",
+    sql: "SELECT r.source_id, r.target_id, r.type, n1.label AS source_label, n2.label AS target_label FROM kg_relations r LEFT JOIN kg_nodes n1 ON r.source_id = n1.id LEFT JOIN kg_nodes n2 ON r.target_id = n2.id ORDER BY r.type",
+  });
+  if (!res.ok || !res.data) return [];
+  return res.data as KgRelationRow[];
+}
+
+export async function queryKgGraph(w: DbWorker): Promise<{ nodes: KgNodeRow[]; edges: KgRelationRow[] }> {
+  const [nodes, edges] = await Promise.all([queryKgNodes(w), queryKgRelations(w)]);
+  return { nodes, edges };
+}
