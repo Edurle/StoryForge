@@ -319,3 +319,114 @@ describe("C-level Gate Tools", () => {
     expect((captured[0] as { kind: string }).kind).toBe("plan_checkpoint");
   });
 });
+
+describe("Create returns ID", () => {
+  it("chapter create returns id", async () => {
+    const result = await reg.dispatch("chapter", { action: "create", title: "ID测试章", volume: 1 });
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+    expect(typeof parsed.id).toBe("number");
+  });
+
+  it("segment create returns id and auto seq", async () => {
+    const chRes = await reg.dispatch("chapter", { action: "create", title: "Seq测试章" });
+    const ch = JSON.parse(chRes);
+    const s1 = await reg.dispatch("segment", { action: "create", chapter_id: ch.id, content: "第一段" });
+    const p1 = JSON.parse(s1);
+    expect(p1.success).toBe(true);
+    expect(typeof p1.id).toBe("number");
+    expect(p1.seq).toBe(0);
+    const s2 = await reg.dispatch("segment", { action: "create", chapter_id: ch.id, content: "第二段" });
+    const p2 = JSON.parse(s2);
+    expect(p2.seq).toBe(1);
+  });
+
+  it("character create returns name", async () => {
+    const result = await reg.dispatch("character", { action: "create", name: "ID测试角色" });
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+    expect(parsed.name).toBe("ID测试角色");
+  });
+});
+
+describe("List, Query and Insert actions", () => {
+  it("chapter list returns array with id", async () => {
+    const result = await reg.dispatch("chapter", { action: "list" });
+    const parsed = JSON.parse(result);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.length).toBeGreaterThan(0);
+    expect(parsed[0]).toHaveProperty("id");
+    expect(parsed[0]).toHaveProperty("title");
+  });
+
+  it("chapter query returns detail with segments", async () => {
+    const list = JSON.parse(await reg.dispatch("chapter", { action: "list" }));
+    const first = list[0];
+    const result = JSON.parse(await reg.dispatch("chapter", { action: "query", id: first.id }));
+    expect(result.id).toBe(first.id);
+    expect(Array.isArray(result.segments)).toBe(true);
+  });
+
+  it("segment list requires chapter_id", async () => {
+    const result = JSON.parse(await reg.dispatch("segment", { action: "list" }));
+    expect(result.error).toBeTruthy();
+  });
+
+  it("segment list by chapter_id returns ordered", async () => {
+    const ch = JSON.parse(await reg.dispatch("chapter", { action: "create", title: "有序章" }));
+    await reg.dispatch("segment", { action: "create", chapter_id: ch.id, content: "段A" });
+    await reg.dispatch("segment", { action: "create", chapter_id: ch.id, content: "段B" });
+    const result = JSON.parse(await reg.dispatch("segment", { action: "list", chapter_id: ch.id }));
+    expect(result.length).toBe(2);
+    expect(result[0].seq).toBeLessThan(result[1].seq);
+  });
+
+  it("segment insert shifts subsequent seq", async () => {
+    const ch = JSON.parse(await reg.dispatch("chapter", { action: "create", title: "插入章" }));
+    const s1 = JSON.parse(await reg.dispatch("segment", { action: "create", chapter_id: ch.id, content: "原段1" }));
+    const s2 = JSON.parse(await reg.dispatch("segment", { action: "create", chapter_id: ch.id, content: "原段2" }));
+    const inserted = JSON.parse(await reg.dispatch("segment", { action: "insert", chapter_id: ch.id, after_id: s1.id, content: "插入段" }));
+    expect(inserted.success).toBe(true);
+    const list = JSON.parse(await reg.dispatch("segment", { action: "list", chapter_id: ch.id }));
+    expect(list.length).toBe(3);
+    const byId = (id: number) => list.find((s: { id: number }) => s.id === id);
+    expect(byId(s1.id).seq).toBe(0);
+    expect(byId(inserted.id).seq).toBe(1);
+    expect(byId(s2.id).seq).toBe(2);
+  });
+
+  it("segment query returns full detail", async () => {
+    const ch = JSON.parse(await reg.dispatch("chapter", { action: "create", title: "详情章" }));
+    const seg = JSON.parse(await reg.dispatch("segment", { action: "create", chapter_id: ch.id, content: "详细内容" }));
+    const result = JSON.parse(await reg.dispatch("segment", { action: "query", id: seg.id }));
+    expect(result.content).toBe("详细内容");
+    expect(result).toHaveProperty("characters");
+  });
+
+  it("outline list returns array", async () => {
+    const result = JSON.parse(await reg.dispatch("outline", { action: "list" }));
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("outline create and query returns detail", async () => {
+    const created = JSON.parse(await reg.dispatch("outline", { action: "create", title: "测试大纲" }));
+    expect(created.success).toBe(true);
+    expect(typeof created.id).toBe("number");
+    const detail = JSON.parse(await reg.dispatch("outline", { action: "query", id: created.id }));
+    expect(detail.title).toBe("测试大纲");
+    expect(detail).toHaveProperty("summary");
+  });
+
+  it("script list returns array", async () => {
+    const result = JSON.parse(await reg.dispatch("script", { action: "list" }));
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("script create and query returns detail", async () => {
+    const created = JSON.parse(await reg.dispatch("script", { action: "create", scene_id: "test_scene_1", content: "测试脚本" }));
+    expect(created.success).toBe(true);
+    expect(typeof created.id).toBe("number");
+    const detail = JSON.parse(await reg.dispatch("script", { action: "query", scene_id: "test_scene_1" }));
+    expect(detail.content).toBe("测试脚本");
+  });
+});

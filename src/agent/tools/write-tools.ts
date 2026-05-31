@@ -32,6 +32,12 @@ async function mergeAttrs(db: DbWorker, table: string, name: string, newAttrs: R
   });
 }
 
+async function getLastInsertId(db: DbWorker): Promise<number> {
+  const res = await db.request({ id: 0, type: "query", sql: "SELECT last_insert_rowid() AS id" });
+  const rows = res.data as { id: number }[];
+  return rows[0]!.id;
+}
+
 export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseGate): void {
   reg.register({
     name: "character",
@@ -73,7 +79,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO characters (name, stage, custom_attrs) VALUES (?, ?, ?)",
           params: [args.name, args.stage ?? "", JSON.stringify(args.attrs ?? {})],
         });
-        return JSON.stringify({ success: true });
+        return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
         if (!args.name) return JSON.stringify({ error: "name required for edit" });
@@ -105,19 +111,46 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "chapter",
-    description: "章节管理。action: create（B级）创建章节，edit（B级）编辑章节，delete（C级）删除章节及段落。",
+    description: "章节管理。action: list（A级）列出章节，query（A级）查询单章节详情，create（B级）创建章节，edit（B级）编辑章节，delete（C级）删除章节及段落。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：create | edit | delete" },
+        action: { type: "string", description: "操作：list | query | create | edit | delete" },
         id: { type: "number", description: "章节ID" },
         title: { type: "string", description: "标题" },
-        volume: { type: "number", description: "卷号" },
+        volume: { type: "number", description: "卷号（list 筛选）" },
         status: { type: "string", description: "状态" },
       },
       required: ["action"],
     },
     fn: async (args: { action: string; id?: number; title?: string; volume?: number; status?: string }) => {
+      if (args.action === "list") {
+        let sql = "SELECT id, volume, title, status FROM chapters";
+        const params: unknown[] = [];
+        if (args.volume != null) { sql += " WHERE volume = ?"; params.push(args.volume); }
+        sql += " ORDER BY volume, id";
+        const res = await db.request({ id: 0, type: "query", sql, params });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        return JSON.stringify(res.data);
+      }
+      if (args.action === "query") {
+        if (args.id == null) return JSON.stringify({ error: "id required for query" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, volume, title, status FROM chapters WHERE id = ?",
+          params: [args.id],
+        });
+        if (!res.ok || !res.data) return JSON.stringify(null);
+        const rows = res.data as { id: number; volume: number; title: string; status: string }[];
+        if (!rows[0]) return JSON.stringify(null);
+        const segRes = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, seq, type, content FROM segments WHERE chapter_id = ? ORDER BY seq, id",
+          params: [args.id],
+        });
+        const segments = (segRes.ok && segRes.data) ? segRes.data as { id: number; seq: number; type: string; content: string }[] : [];
+        return JSON.stringify({ ...rows[0], segments });
+      }
       if (args.action === "create") {
         const title = args.title ?? "";
         const summary = `创建章节 "${title}"`;
@@ -129,7 +162,8 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO chapters (volume, title, status) VALUES (?, ?, ?)",
           params: [args.volume ?? 1, title, args.status ?? "draft"],
         });
-        return JSON.stringify({ success: true });
+        const newId = await getLastInsertId(db);
+        return JSON.stringify({ success: true, id: newId });
       }
       if (args.action === "edit") {
         if (args.id == null) return JSON.stringify({ error: "id required for edit" });
@@ -162,34 +196,91 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "segment",
-    description: "段落管理。action: create（B级）写入段落，edit（B级）编辑段落，delete（C级）删除段落。",
+    description: "段落管理。action: list（A级）按章节列出段落，query（A级）查询单段落详情，create（B级）追加段落到末尾，insert（B级）插入段落到指定位置，edit（B级）编辑段落，delete（C级）删除段落。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：create | edit | delete" },
-        id: { type: "number", description: "段落ID" },
-        chapter_id: { type: "number", description: "章节ID" },
+        action: { type: "string", description: "操作：list | query | create | insert | edit | delete" },
+        id: { type: "number", description: "段落ID（query/edit/delete用）" },
+        chapter_id: { type: "number", description: "章节ID（list/create用）" },
+        after_id: { type: "number", description: "插入到指定段落之后（insert用）" },
         content: { type: "string", description: "内容" },
-        position: { type: "number", description: "插入位置" },
         type: { type: "string", description: "类型" },
         mood: { type: "string", description: "情绪" },
         location: { type: "string", description: "地点" },
       },
       required: ["action"],
     },
-    fn: async (args: { action: string; id?: number; chapter_id?: number; content?: string; position?: number; type?: string; mood?: string; location?: string }) => {
+    fn: async (args: { action: string; id?: number; chapter_id?: number; content?: string; after_id?: number; type?: string; mood?: string; location?: string }) => {
+      if (args.action === "list") {
+        if (args.chapter_id == null) return JSON.stringify({ error: "chapter_id required for list" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, seq, type, mood, location FROM segments WHERE chapter_id = ? ORDER BY seq, id",
+          params: [args.chapter_id],
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        return JSON.stringify(res.data);
+      }
+      if (args.action === "query") {
+        if (args.id == null) return JSON.stringify({ error: "id required for query" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, chapter_id, seq, type, content, characters, mood, location FROM segments WHERE id = ?",
+          params: [args.id],
+        });
+        if (!res.ok || !res.data) return JSON.stringify(null);
+        const rows = res.data as { id: number; chapter_id: number; seq: number; type: string; content: string; characters: string; mood: string; location: string }[];
+        if (!rows[0]) return JSON.stringify(null);
+        const row = rows[0];
+        return JSON.stringify({ ...row, characters: JSON.parse(row.characters) as string[] });
+      }
       if (args.action === "create") {
         if (args.chapter_id == null || args.content == null) return JSON.stringify({ error: "chapter_id and content required" });
         const summary = `写入章节 ${args.chapter_id} 文本`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
         if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
-        await db.request({
-          id: 0,
-          type: "run",
-          sql: "INSERT INTO segments (chapter_id, seq, content) VALUES (?, ?, ?)",
-          params: [args.chapter_id, args.position ?? 0, args.content],
+        const maxRes = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT COALESCE(MAX(seq), -1) AS max_seq FROM segments WHERE chapter_id = ?",
+          params: [args.chapter_id],
         });
-        return JSON.stringify({ success: true });
+        const maxRows = (maxRes.ok && maxRes.data) ? maxRes.data as { max_seq: number }[] : [{ max_seq: -1 }];
+        const nextSeq = maxRows[0]!.max_seq + 1;
+        await db.request({
+          id: 0, type: "run",
+          sql: "INSERT INTO segments (chapter_id, seq, content) VALUES (?, ?, ?)",
+          params: [args.chapter_id, nextSeq, args.content],
+        });
+        const newId = await getLastInsertId(db);
+        return JSON.stringify({ success: true, id: newId, seq: nextSeq });
+      }
+      if (args.action === "insert") {
+        if (args.chapter_id == null || args.content == null || args.after_id == null) return JSON.stringify({ error: "chapter_id, content, after_id required" });
+        const summary = `插入段落到章节 ${args.chapter_id}（${args.after_id}之后）`;
+        const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
+        if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
+        const afterRes = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT seq FROM segments WHERE id = ? AND chapter_id = ?",
+          params: [args.after_id, args.chapter_id],
+        });
+        if (!afterRes.ok || !afterRes.data) return JSON.stringify({ error: "after_id not found" });
+        const afterRows = afterRes.data as { seq: number }[];
+        if (!afterRows[0]) return JSON.stringify({ error: "after_id not found" });
+        const afterSeq = afterRows[0].seq;
+        await db.request({
+          id: 0, type: "run",
+          sql: "UPDATE segments SET seq = seq + 1 WHERE chapter_id = ? AND seq > ?",
+          params: [args.chapter_id, afterSeq],
+        });
+        await db.request({
+          id: 0, type: "run",
+          sql: "INSERT INTO segments (chapter_id, seq, content) VALUES (?, ?, ?)",
+          params: [args.chapter_id, afterSeq + 1, args.content],
+        });
+        const newId = await getLastInsertId(db);
+        return JSON.stringify({ success: true, id: newId, seq: afterSeq + 1 });
       }
       if (args.action === "edit") {
         if (args.id == null) return JSON.stringify({ error: "id required for edit" });
@@ -256,7 +347,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO timeline_events (id, time, description, characters, location, cause_id) VALUES (?, ?, ?, ?, ?, ?)",
           params: [args.id, args.time, args.description, JSON.stringify(args.characters ?? []), args.location ?? "", args.cause_id ?? null],
         });
-        return JSON.stringify({ success: true });
+        return JSON.stringify({ success: true, id: args.id });
       }
       if (args.action === "edit") {
         if (args.event_id == null) return JSON.stringify({ error: "event_id required for edit" });
@@ -286,7 +377,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "outline",
-    description: "大纲管理。action: create（B级）创建节点，edit（B级）编辑节点，delete（C级）删除节点。",
+    description: "大纲管理。action: list（A级）列出大纲节点，query（A级）查询单节点详情，create（B级）创建节点，edit（B级）编辑节点，delete（C级）删除节点。",
     parameters: {
       type: "object",
       properties: {
@@ -303,6 +394,27 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
       required: ["action"],
     },
     fn: async (args: { action: string; id?: number; parent_id?: number; volume?: number; seq?: number; title?: string; summary?: string; foreshadow?: string; status?: string }) => {
+      if (args.action === "list") {
+        let sql = "SELECT id, parent_id, volume, seq, title, status FROM outlines";
+        const params: unknown[] = [];
+        if (args.volume != null) { sql += " WHERE volume = ?"; params.push(args.volume); }
+        sql += " ORDER BY volume, seq, id";
+        const res = await db.request({ id: 0, type: "query", sql, params });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        return JSON.stringify(res.data);
+      }
+      if (args.action === "query") {
+        if (args.id == null) return JSON.stringify({ error: "id required for query" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, parent_id, volume, seq, title, summary, foreshadow, status FROM outlines WHERE id = ?",
+          params: [args.id],
+        });
+        if (!res.ok || !res.data) return JSON.stringify(null);
+        const rows = res.data as Record<string, unknown>[];
+        if (!rows[0]) return JSON.stringify(null);
+        return JSON.stringify(rows[0]);
+      }
       if (args.action === "create") {
         const title = args.title ?? "";
         const summary = `创建大纲 "${title}"`;
@@ -314,7 +426,8 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO outlines (parent_id, volume, seq, title, summary, foreshadow, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
           params: [args.parent_id ?? null, args.volume ?? 1, args.seq ?? 0, title, args.summary ?? "", args.foreshadow ?? "", args.status ?? "draft"],
         });
-        return JSON.stringify({ success: true });
+        const newId = await getLastInsertId(db);
+        return JSON.stringify({ success: true, id: newId });
       }
       if (args.action === "edit") {
         if (args.id == null) return JSON.stringify({ error: "id required for edit" });
@@ -378,7 +491,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO global_constants (key, value, description) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, description = excluded.description",
           params: [args.key, args.value, args.description ?? ""],
         });
-        return JSON.stringify({ success: true });
+        return JSON.stringify({ success: true, key: args.key });
       }
       return JSON.stringify({ error: `unknown action: ${args.action}` });
     },
@@ -415,7 +528,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO formulas (name, template, description, vars) VALUES (?, ?, ?, ?)",
           params: [args.name, args.template, args.description ?? "", args.vars ?? ""],
         });
-        return JSON.stringify({ success: true });
+        return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
         if (!args.name) return JSON.stringify({ error: "name required for edit" });
@@ -460,13 +573,11 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO items (name, type, custom_attrs) VALUES (?, ?, ?)",
           params: [args.name, args.type ?? "", JSON.stringify(args.attrs ?? {})],
         });
-        return JSON.stringify({ success: true });
+        return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
         const summary = `编辑物品 "${args.name}"`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
-        if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
-        if (args.attrs) await mergeAttrs(db, "items", args.name, args.attrs);
         if (args.type) {
           await db.request({
             id: 0,
@@ -512,7 +623,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO factions (name, description, custom_attrs) VALUES (?, ?, ?)",
           params: [args.name, args.description ?? "", JSON.stringify(args.attrs ?? {})],
         });
-        return JSON.stringify({ success: true });
+        return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
         const summary = `编辑势力 "${args.name}"`;
@@ -564,7 +675,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO locations (name, description, custom_attrs) VALUES (?, ?, ?)",
           params: [args.name, args.description ?? "", JSON.stringify(args.attrs ?? {})],
         });
-        return JSON.stringify({ success: true });
+        return JSON.stringify({ success: true, name: args.name });
       }
       if (args.action === "edit") {
         const summary = `编辑地点 "${args.name}"`;
@@ -594,20 +705,40 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "script",
-    description: "脚本管理。action: create（B级）创建脚本，edit（B级）编辑脚本。",
+    description: "脚本管理。action: list（A级）列出脚本，query（A级）查询单脚本详情，create（B级）创建脚本，edit（B级）编辑脚本。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：create | edit" },
-        scene_id: { type: "string", description: "场景ID" },
+        action: { type: "string", description: "操作：list | query | create | edit" },
+        scene_id: { type: "string", description: "场景ID（query/create/edit用）" },
         scene_type: { type: "string", description: "场景类型" },
         title: { type: "string", description: "标题" },
         content: { type: "string", description: "内容" },
         constraints: { type: "object", description: "约束条件" },
       },
-      required: ["action", "scene_id"],
+      required: ["action"],
     },
     fn: async (args: { action: string; scene_id: string; scene_type?: string; title?: string; content?: string; constraints?: Record<string, unknown> }) => {
+      if (args.action === "list") {
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, scene_id, scene_type, title FROM scripts ORDER BY id",
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        return JSON.stringify(res.data);
+      }
+      if (args.action === "query") {
+        if (args.scene_id == null) return JSON.stringify({ error: "scene_id required for query" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, scene_id, scene_type, title, content, constraints FROM scripts WHERE scene_id = ?",
+          params: [args.scene_id],
+        });
+        if (!res.ok || !res.data) return JSON.stringify(null);
+        const rows = res.data as Record<string, unknown>[];
+        if (!rows[0]) return JSON.stringify(null);
+        return JSON.stringify(rows[0]);
+      }
       if (args.action === "create") {
         const summary = `创建脚本 "${args.scene_id}"`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
@@ -618,7 +749,8 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO scripts (scene_id, scene_type, title, content, constraints) VALUES (?, ?, ?, ?, ?)",
           params: [args.scene_id, args.scene_type ?? "", args.title ?? "", args.content ?? "", JSON.stringify(args.constraints ?? {})],
         });
-        return JSON.stringify({ success: true });
+        const newId = await getLastInsertId(db);
+        return JSON.stringify({ success: true, id: newId });
       }
       if (args.action === "edit") {
         const summary = `编辑脚本 "${args.scene_id}"`;
@@ -667,7 +799,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           sql: "INSERT INTO kg_nodes (id, type, label, attrs) VALUES (?, ?, ?, ?)",
           params: [args.id, args.type, args.label, JSON.stringify(args.attrs ?? {})],
         });
-        return JSON.stringify({ success: true });
+        return JSON.stringify({ success: true, id: args.id });
       }
       if (args.action === "create_relation") {
         if (args.source_id == null || args.target_id == null || args.type == null) return JSON.stringify({ error: "source_id, target_id, type required" });
