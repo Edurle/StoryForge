@@ -268,7 +268,11 @@ async function loadChapters() {
 }
 
 async function selectChapter(id: number) {
-  if (selectedChapterId.value === id) return;
+  if (selectedChapterId.value === id) {
+    selectedChapterId.value = null;
+    chapterContent.value = "";
+    return;
+  }
   selectedChapterId.value = id;
   chapterLoading.value = true;
   chapterContent.value = "";
