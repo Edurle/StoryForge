@@ -1,3 +1,25 @@
+# 首页重设计 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 重设计首页为品牌区 + 项目卡片网格 + 创建区域 + 空状态引导 + 删除功能，视觉与工作台统一。
+
+**Architecture:** 单文件改动 `web/src/views/ProjectList.vue`，完全重写 template + script + style。需删除 API 已在 client.ts 中存在。
+
+**Tech Stack:** Vue 3 Composition API, CSS (scoped)
+
+---
+
+### Task: 重写 ProjectList.vue
+
+**Files:**
+- Modify: `web/src/views/ProjectList.vue` (完全重写)
+
+- [ ] **Step 1: 替换整个文件内容**
+
+将 `web/src/views/ProjectList.vue` 的全部内容替换为：
+
+```html
 <template>
   <div class="home">
     <header class="home-header">
@@ -279,3 +301,23 @@ async function doDelete() {
 }
 .delete-confirm:hover { background: #dc2626; }
 </style>
+```
+
+- [ ] **Step 2: 运行前端 typecheck**
+
+Run: `npx vue-tsc --noEmit` (在 `web/` 目录下)
+Expected: zero errors
+
+- [ ] **Step 3: 运行后端 typecheck + 测试**
+
+Run: `npm run typecheck && npm run test` (在项目根目录)
+Expected: zero errors, 188 tests pass
+
+- [ ] **Step 4: 验证页面**
+
+Run: `npm run dev` 启动前后端，浏览器访问 `http://localhost:3456` 确认：
+- 品牌区显示正常
+- 项目卡片网格正确渲染
+- 点击卡片进入工作台
+- 删除按钮弹出确认对话框
+- 空状态显示引导文案

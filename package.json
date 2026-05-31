@@ -11,7 +11,8 @@
     "dev:stop": "./dev.sh stop",
     "dev:restart": "./dev.sh restart",
     "dev:status": "./dev.sh status",
-    "setup-key": "npx tsx src/server/setup-key.ts"
+    "setup-key": "npx tsx src/server/setup-key.ts",
+    "backup": "npx tsx scripts/backup.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
