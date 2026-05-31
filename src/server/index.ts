@@ -9,21 +9,13 @@ import type { StreamDeltaEvent } from "../agent/loop.js";
 import type { PauseGate } from "../../lib/reasonix-core/core/pause-gate.js";
 import { errorHandler } from "./middleware/error.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
-import { getUsageSummary } from "../services/usage.js";
-import { loadHistory, getLatestSessionId, saveMessages } from "../services/history.js";
-
-export interface ChatModelOptions {
-  model: string;
-  thinking: string;
-  reasoningEffort: string;
-}
+import { getUsageSummary, getCompressUsageSummary } from "../services/usage.js";
+import { recordUsage } from "../services/usage.js";
+import { loadHistory, saveMessages, saveSnapshot, cleanOldSnapshots, getNextSeq, touchSession } from "../services/history.js";
 
 export interface ServerDeps {
   getDbWorker: (projectId: string) => DbWorker;
-  createLoop: (projectId: string, opts: ChatModelOptions) => Promise<StoryForgeLoop & {
-    sessionId: string;
-    setOnDelta: (cb: ((event: StreamDeltaEvent) => void) | undefined) => void;
-  }>;
+  getOrCreateLoop: (projectId: string) => Promise<{ loop: StoryForgeLoop; sessionId: string }>;
   projectsDb: DbWorker;
   gate: PauseGate;
 }
@@ -127,20 +119,26 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders();
 
-    const loop = await deps.createLoop(projectId, { model, thinking, reasoningEffort });
+    let { loop, sessionId } = await deps.getOrCreateLoop(projectId);
+    const seqBefore = loop.messageCount;
     let pendingUsage: UsageInfo | undefined;
     const usageMap = new Map<number, UsageInfo>();
+    let compressUsageInfo: { promptTokens: number; completionTokens: number; cacheHitTokens: number; cacheMissTokens: number } | undefined;
+    let wasCompressed = false;
 
-    loop.setOnDelta((delta) => {
-      res.write(`event: ${delta.type}\ndata: ${JSON.stringify({ content: delta.content })}\n\n`);
-    });
-
-    const offGate = deps.gate.on((req) => {
-      res.write(`event: gate_request\ndata: ${JSON.stringify({ id: req.id, kind: req.kind, payload: req.payload })}\n\n`);
+    const offGate = deps.gate.on((gateReq) => {
+      res.write(`event: gate_request\ndata: ${JSON.stringify({ id: gateReq.id, kind: gateReq.kind, payload: gateReq.payload })}\n\n`);
     });
 
     try {
-      for await (const event of loop.runTurn(message)) {
+      for await (const event of loop.runTurn(message, {
+        model,
+        thinking: thinking === "enabled" ? "enabled" : "disabled",
+        reasoningEffort: reasoningEffort as "high" | "max" | undefined,
+        onDelta: (delta: StreamDeltaEvent) => {
+          res.write(`event: ${delta.type}\ndata: ${JSON.stringify({ content: delta.content })}\n\n`);
+        },
+      })) {
         if (event.type === "usage") {
           pendingUsage = { ...event.usage, costYuan: calcCost(event.usage, model) };
           res.write(`event: usage\ndata: ${JSON.stringify(pendingUsage)}\n\n`);
@@ -155,10 +153,12 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
           res.write(`event: tool_call\ndata: ${JSON.stringify({ name: event.call.function.name, args: event.call.function.arguments })}\n\n`);
         } else if (event.type === "tool_result") {
           res.write(`event: tool_result\ndata: ${JSON.stringify({ name: event.call.function.name, result: event.result })}\n\n`);
+        } else if (event.type === "compressed") {
+          compressUsageInfo = event.compressUsage;
+          wasCompressed = true;
+          res.write(`event: compressed\ndata: ${JSON.stringify({ beforeTokens: event.beforeTokens, afterTokens: event.afterTokens, summaryLevels: event.summaryLevels })}\n\n`);
         } else if (event.type === "done") {
           res.write(`event: done\ndata: ${JSON.stringify({ content: event.content })}\n\n`);
-        } else if (event.type === "compressed") {
-          res.write(`event: compressed\ndata: ${JSON.stringify({ beforeTokens: event.beforeTokens, afterTokens: event.afterTokens, summaryLevels: event.summaryLevels })}\n\n`);
         } else if (event.type === "error") {
           res.write(`event: error\ndata: ${JSON.stringify({ error: event.error.message })}\n\n`);
         }
@@ -166,7 +166,32 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     } finally {
       offGate();
       const db = deps.getDbWorker(projectId);
-      saveMessages(db, loop.sessionId, loop.getMessages(), usageMap).catch(() => {});
+      const allMessages = loop.getMessages();
+      const newMessages = allMessages.slice(seqBefore);
+      const startSeq = await getNextSeq(db, sessionId);
+
+      saveMessages(db, sessionId, newMessages, startSeq, usageMap).catch(() => {});
+      saveSnapshot(db, projectId, sessionId, allMessages, loop.lastPromptTokenCount, wasCompressed ? 1 : 0).catch(() => {});
+      cleanOldSnapshots(db, sessionId).catch(() => {});
+      touchSession(db, sessionId).catch(() => {});
+      if (compressUsageInfo) {
+        recordUsage(db, sessionId, {
+          promptTokens: compressUsageInfo.promptTokens,
+          completionTokens: compressUsageInfo.completionTokens,
+          cacheHitTokens: compressUsageInfo.cacheHitTokens,
+          cacheMissTokens: compressUsageInfo.cacheMissTokens,
+          model,
+        }, "compress").catch(() => {});
+      }
+      if (pendingUsage) {
+        recordUsage(db, sessionId, {
+          promptTokens: pendingUsage.promptTokens,
+          completionTokens: pendingUsage.completionTokens,
+          cacheHitTokens: pendingUsage.cacheHitTokens,
+          cacheMissTokens: pendingUsage.cacheMissTokens,
+          model,
+        }).catch(() => {});
+      }
       res.end();
     }
   });
@@ -192,14 +217,17 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     res.json(summary);
   });
 
-  app.get("/api/projects/:projectId/history", async (req: Request, res: Response) => {
+  app.get("/api/projects/:projectId/compress-usage", async (req: Request, res: Response) => {
     const projectId = (req.params as Record<string, string | undefined>).projectId!;
     const db = deps.getDbWorker(projectId);
-    const sessionId = await getLatestSessionId(db);
-    if (!sessionId) {
-      res.json([]);
-      return;
-    }
+    const summary = await getCompressUsageSummary(db);
+    res.json(summary);
+  });
+
+  app.get("/api/projects/:projectId/history", async (req: Request, res: Response) => {
+    const projectId = (req.params as Record<string, string | undefined>).projectId!;
+    const { sessionId } = await deps.getOrCreateLoop(projectId);
+    const db = deps.getDbWorker(projectId);
     const messages = await loadHistory(db, sessionId);
     res.json(messages);
   });

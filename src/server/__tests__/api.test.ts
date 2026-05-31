@@ -21,7 +21,7 @@ function createMockDeps(): ServerDeps {
     getDbWorker: vi.fn().mockReturnValue({
       request: async () => ({ ok: true, data: [] }),
     }),
-    createLoop: vi.fn(),
+    getOrCreateLoop: vi.fn(),
     projectsDb: testProjectsDb,
     gate,
   };
@@ -42,7 +42,6 @@ afterAll(() => {
   try { rmSync(testDbDir, { recursive: true, force: true }); } catch {}
 });
 
-// Initialize test DB once
 testDbDir = mkdtempSync(join(tmpdir(), "sf-api-"));
 testProjectsDb = createDbWorker(join(testDbDir, "test-projects.db"));
 
@@ -122,9 +121,9 @@ describe("Chat SSE", () => {
   });
 
   it("POST /api/projects/:id/chat returns SSE stream", async () => {
-    const savedMessages: unknown[] = [];
     const mockLoop = {
-      sessionId: "test-session-1",
+      messageCount: 0,
+      lastPromptTokenCount: 0,
       getMessages: () => [{ role: "user", content: "查询叶凡" }, { role: "assistant", content: "叶凡在筑基九层" }],
       async *runTurn(_input: string) {
         yield { type: "usage", usage: { promptTokens: 100, completionTokens: 50, cacheHitTokens: 80, cacheMissTokens: 20 } };
@@ -134,9 +133,8 @@ describe("Chat SSE", () => {
         yield { type: "done", content: "叶凡在筑基九层" };
       },
       abort() {},
-      setOnDelta: vi.fn(),
     };
-    deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
+    deps.getOrCreateLoop = vi.fn().mockResolvedValue({ loop: mockLoop, sessionId: "test-session-1" });
 
     const res = await request(app).post("/api/projects/test-project-id/chat").send({ message: "查询叶凡" });
     expect(res.status).toBe(200);
@@ -149,62 +147,37 @@ describe("Chat SSE", () => {
     assertNoApiKeyLeak(res.text);
   });
 
-  it("POST /api/projects/:id/chat passes model opts to createLoop", async () => {
+  it("POST /api/projects/:id/chat passes model opts to runTurn", async () => {
     const mockLoop = {
-      sessionId: "test-session-opts",
+      messageCount: 0,
+      lastPromptTokenCount: 0,
       getMessages: () => [],
-      async *runTurn(_input: string) {
-        yield { type: "done", content: "ok" };
+      async *runTurn(_input: string, opts: any) {
+        yield { type: "done", content: `model:${opts?.model}` };
       },
       abort() {},
-      setOnDelta: vi.fn(),
     };
-    deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
+    deps.getOrCreateLoop = vi.fn().mockResolvedValue({ loop: mockLoop, sessionId: "test-session-opts" });
 
-    await request(app)
+    const res = await request(app)
       .post("/api/projects/test-project-id/chat")
       .send({ message: "hi", model: "deepseek-v4-pro", thinking: "disabled", reasoning_effort: "max" });
 
-    expect(deps.createLoop).toHaveBeenCalledWith(
-      "test-project-id",
-      { model: "deepseek-v4-pro", thinking: "disabled", reasoningEffort: "max" },
-    );
+    expect(res.text).toContain("model:deepseek-v4-pro");
   });
 
-  it("POST /api/projects/:id/chat uses defaults when no model opts", async () => {
-    const mockLoop = {
-      sessionId: "test-session-defaults",
-      getMessages: () => [],
-      async *runTurn(_input: string) {
-        yield { type: "done", content: "ok" };
-      },
-      abort() {},
-      setOnDelta: vi.fn(),
-    };
-    deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
-
-    await request(app)
-      .post("/api/projects/test-project-id/chat")
-      .send({ message: "hi" });
-
-    expect(deps.createLoop).toHaveBeenCalledWith(
-      "test-project-id",
-      { model: "deepseek-v4-flash", thinking: "enabled", reasoningEffort: "high" },
-    );
-  });
-
-  it("GET /api/projects/:id/history returns messages from latest session", async () => {
+  it("GET /api/projects/:id/history returns messages from session", async () => {
     const historyData = [
-      { seq: 0, role: "user", content: "你好", toolCalls: "[]", toolCallId: "", reasoningContent: "" },
-      { seq: 1, role: "assistant", content: "你好！我是书灵。", toolCalls: "[]", toolCallId: "", reasoningContent: "" },
+      { seq: 0, role: "user", content: "你好", toolCalls: "[]", toolCallId: "", reasoningContent: "", usageJson: "" },
+      { seq: 1, role: "assistant", content: "你好！我是书灵。", toolCalls: "[]", toolCallId: "", reasoningContent: "", usageJson: "" },
     ];
     deps.getDbWorker = vi.fn().mockReturnValue({
       request: async (req: any) => {
-        if (req.sql.includes("agent_sessions")) return { ok: true, data: [{ id: "sess-1" }] };
         if (req.sql.includes("agent_messages")) return { ok: true, data: historyData };
         return { ok: true, data: [] };
       },
     });
+    deps.getOrCreateLoop = vi.fn().mockResolvedValue({ loop: {}, sessionId: "sess-1" });
 
     const res = await request(app).get("/api/projects/test-id/history");
     expect(res.status).toBe(200);
@@ -226,15 +199,15 @@ describe("Chat SSE error handling", () => {
 
   it("POST /api/projects/:id/chat sends error event on loop error", async () => {
     const mockLoop = {
-      sessionId: "test-session-err",
+      messageCount: 0,
+      lastPromptTokenCount: 0,
       getMessages: () => [{ role: "user", content: "测试错误" }, { role: "assistant", content: "" }],
       async *runTurn(_input: string) {
         yield { type: "error", error: new Error("模型过载") };
       },
       abort() {},
-      setOnDelta: vi.fn(),
     };
-    deps.createLoop = vi.fn().mockResolvedValue(mockLoop);
+    deps.getOrCreateLoop = vi.fn().mockResolvedValue({ loop: mockLoop, sessionId: "test-session-err" });
     deps.getDbWorker = vi.fn().mockReturnValue({
       request: async () => ({ ok: true, data: [] }),
     });

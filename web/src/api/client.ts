@@ -31,6 +31,16 @@ export const api = {
     const res = await fetch(`${BASE}/${projectId}/usage`);
     return res.json();
   },
+  async getCompressUsage(projectId: string): Promise<{
+    totalCalls: number;
+    totalPromptTokens: number;
+    totalCompletionTokens: number;
+    totalCacheHitTokens: number;
+    totalCostYuan: number;
+  }> {
+    const res = await fetch(`${BASE}/${projectId}/compress-usage`);
+    return res.json();
+  },
   async getHistory(projectId: string): Promise<Array<{
     seq: number;
     role: string;

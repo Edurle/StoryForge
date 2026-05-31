@@ -202,4 +202,39 @@ describe("StoryForgeLoop", () => {
     expect(events[0].error).toBeInstanceOf(Error);
     expect(events[0].error.message).toBe("API timeout");
   });
+
+  it("runTurn passes model opts to client.chat", async () => {
+    const { chatMock, client, tools, prefix } = createMocks();
+
+    chatMock.mockResolvedValue(fakeResponse({ content: "ok" }));
+
+    const loop = new StoryForgeLoop({ client, tools, prefix });
+    const events: any[] = [];
+    for await (const event of loop.runTurn("test", {
+      model: "deepseek-v4-pro",
+      thinking: "enabled",
+      reasoningEffort: "max",
+    })) {
+      events.push(event);
+    }
+
+    expect(chatMock).toHaveBeenCalledTimes(1);
+    const callOpts = chatMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(callOpts["model"]).toBe("deepseek-v4-pro");
+    expect(callOpts["thinking"]).toBe("enabled");
+    expect(callOpts["reasoningEffort"]).toBe("max");
+  });
+
+  it("messageCount and lastPromptTokenCount track state", async () => {
+    const { chatMock, client, tools, prefix } = createMocks();
+
+    chatMock.mockResolvedValue(fakeResponse({ content: "ok" }));
+
+    const loop = new StoryForgeLoop({ client, tools, prefix });
+    expect(loop.messageCount).toBe(0);
+
+    for await (const _ of loop.runTurn("test")) { /* drain */ }
+
+    expect(loop.messageCount).toBe(2);
+  });
 });

@@ -4,11 +4,14 @@
       <router-link to="/" class="back-link">← 返回</router-link>
       <span class="project-name">{{ projectStore.currentName }}</span>
       <span class="usage-stats" v-if="usage.totalCalls > 0">
-        📊 {{ usage.totalCalls }}次
+        对话: {{ usage.totalCalls }}次
         · 输入 {{ (usage.totalPromptTokens / 1000).toFixed(1) }}k
         · 输出 {{ (usage.totalCompletionTokens / 1000).toFixed(1) }}k
-        · 缓存 {{ cachePercent }}%
         · ¥{{ usage.totalCostYuan.toFixed(4) }}
+        <span v-if="compressUsage.totalCalls > 0" style="margin-left: 8px;">
+          压缩: {{ compressUsage.totalCalls }}次
+          · ¥{{ compressUsage.totalCostYuan.toFixed(4) }}
+        </span>
         <span class="ctx-bar" v-if="lastContextTokens > 0">
           <span class="ctx-fill" :class="ctxClass" :style="{ width: ctxPercent + '%' }"></span>
         </span>
@@ -158,6 +161,7 @@ const messages = ref<DisplayMessage[]>([]);
 const systemPrompt = ref("");
 const showSystemPrompt = ref(false);
 const usage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 });
+const compressUsage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 });
 const messagesContainer = ref<HTMLElement | null>(null);
 const currentModel = ref("deepseek-v4-flash");
 const currentThinking = ref("enabled");
@@ -227,7 +231,9 @@ async function loadSystemPrompt() {
 
 async function loadUsage() {
   try {
-    usage.value = await api.getUsage(props.id);
+    const [u, cu] = await Promise.all([api.getUsage(props.id), api.getCompressUsage(props.id)]);
+    usage.value = u;
+    compressUsage.value = cu;
   } catch {}
 }
 

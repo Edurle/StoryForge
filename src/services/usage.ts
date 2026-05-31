@@ -12,41 +12,45 @@ export async function recordUsage(
   w: DbWorker,
   sessionId: string,
   usage: UsageRecord,
+  type: "chat" | "compress" = "chat",
 ): Promise<void> {
   await w.request({
     id: 0,
     type: "run",
-    sql: "INSERT INTO api_usage (session_id, prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens, model) VALUES (?, ?, ?, ?, ?, ?)",
-    params: [sessionId, usage.promptTokens, usage.completionTokens, usage.cacheHitTokens, usage.cacheMissTokens, usage.model],
+    sql: "INSERT INTO api_usage (session_id, prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens, model, type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    params: [sessionId, usage.promptTokens, usage.completionTokens, usage.cacheHitTokens, usage.cacheMissTokens, usage.model, type],
   });
 }
 
-export async function getUsageSummary(
-  w: DbWorker,
-): Promise<{
+const COST_SQL = `
+  SELECT COUNT(*) as totalCalls,
+         COALESCE(SUM(prompt_tokens), 0) as totalPromptTokens,
+         COALESCE(SUM(completion_tokens), 0) as totalCompletionTokens,
+         COALESCE(SUM(cache_hit_tokens), 0) as totalCacheHitTokens,
+         COALESCE(SUM(
+           cache_hit_tokens * CASE WHEN model LIKE '%pro%' THEN 0.000000025 ELSE 0.00000002 END
+           + cache_miss_tokens * CASE WHEN model LIKE '%pro%' THEN 0.000003 ELSE 0.000001 END
+           + completion_tokens * CASE WHEN model LIKE '%pro%' THEN 0.000006 ELSE 0.000002 END
+         ), 0) as totalCostYuan
+  FROM api_usage
+  WHERE type = ?`;
+
+interface UsageSummary {
   totalCalls: number;
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalCacheHitTokens: number;
   totalCostYuan: number;
-}> {
-  const res = await w.request({
-    id: 0,
-    type: "query",
-    sql: `SELECT COUNT(*) as totalCalls,
-           COALESCE(SUM(prompt_tokens), 0) as totalPromptTokens,
-           COALESCE(SUM(completion_tokens), 0) as totalCompletionTokens,
-           COALESCE(SUM(cache_hit_tokens), 0) as totalCacheHitTokens,
-           COALESCE(SUM(
-             cache_hit_tokens * CASE WHEN model LIKE '%pro%' THEN 0.000000025 ELSE 0.00000002 END
-             + cache_miss_tokens * CASE WHEN model LIKE '%pro%' THEN 0.000003 ELSE 0.000001 END
-             + completion_tokens * CASE WHEN model LIKE '%pro%' THEN 0.000006 ELSE 0.000002 END
-           ), 0) as totalCostYuan
-         FROM api_usage`,
-  });
-  if (!res.ok || !res.data) return { totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 };
+}
+
+function emptySummary(): UsageSummary {
+  return { totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 };
+}
+
+function parseSummary(res: { ok: boolean; data?: unknown }): UsageSummary {
+  if (!res.ok || !res.data) return emptySummary();
   const row = (res.data as Array<Record<string, number>>)[0];
-  if (!row) return { totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 };
+  if (!row) return emptySummary();
   return {
     totalCalls: row["totalCalls"] ?? 0,
     totalPromptTokens: row["totalPromptTokens"] ?? 0,
@@ -54,4 +58,14 @@ export async function getUsageSummary(
     totalCacheHitTokens: row["totalCacheHitTokens"] ?? 0,
     totalCostYuan: row["totalCostYuan"] ?? 0,
   };
+}
+
+export async function getUsageSummary(w: DbWorker): Promise<UsageSummary> {
+  const res = await w.request({ id: 0, type: "query", sql: COST_SQL, params: ["chat"] });
+  return parseSummary(res);
+}
+
+export async function getCompressUsageSummary(w: DbWorker): Promise<UsageSummary> {
+  const res = await w.request({ id: 0, type: "query", sql: COST_SQL, params: ["compress"] });
+  return parseSummary(res);
 }

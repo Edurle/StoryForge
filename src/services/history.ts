@@ -16,17 +16,12 @@ export async function saveMessages(
   w: DbWorker,
   sessionId: string,
   messages: readonly ChatMessage[],
+  startSeq: number,
   usageMap?: ReadonlyMap<number, UsageInfo>,
 ): Promise<void> {
-  await w.request({
-    id: 0,
-    type: "run",
-    sql: "INSERT OR IGNORE INTO agent_sessions (id, project_id, model) VALUES (?, '', '')",
-    params: [sessionId],
-  });
-
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]!;
+    const globalIdx = startSeq + i;
     const usage = usageMap?.get(i);
     let toolCallsJson = JSON.stringify(m.tool_calls ?? []);
     if (m.role === "tool" && m.tool_call_id) {
@@ -47,7 +42,7 @@ export async function saveMessages(
       sql: "INSERT INTO agent_messages (session_id, seq, role, content, tool_calls, tool_call_id, reasoning_content, usage_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       params: [
         sessionId,
-        i,
+        globalIdx,
         m.role,
         m.content ?? "",
         toolCallsJson,
@@ -81,31 +76,33 @@ export async function loadHistory(
   }));
 }
 
-export async function getLatestSessionId(
+export async function getNextSeq(
   w: DbWorker,
-): Promise<string | null> {
+  sessionId: string,
+): Promise<number> {
   const res = await w.request({
     id: 0,
     type: "query",
-    sql: "SELECT id FROM agent_sessions ORDER BY updated_at DESC LIMIT 1",
-    params: [],
+    sql: "SELECT COALESCE(MAX(seq), -1) as maxSeq FROM agent_messages WHERE session_id = ?",
+    params: [sessionId],
   });
-  if (!res.ok || !res.data) return null;
+  if (!res.ok || !res.data) return 0;
   const rows = res.data as Array<Record<string, unknown>>;
-  if (rows.length === 0) return null;
-  return rows[0]!["id"] as string;
+  if (rows.length === 0) return 0;
+  return ((rows[0]!["maxSeq"] as number | null | undefined) ?? -1) + 1;
 }
 
 export async function createSession(
   w: DbWorker,
   sessionId: string,
+  projectId: string,
   model: string,
 ): Promise<void> {
   await w.request({
     id: 0,
     type: "run",
-    sql: "INSERT INTO agent_sessions (id, project_id, model) VALUES (?, '', ?)",
-    params: [sessionId, model],
+    sql: "INSERT OR IGNORE INTO agent_sessions (id, project_id, model) VALUES (?, ?, ?)",
+    params: [sessionId, projectId, model],
   });
 }
 
@@ -121,17 +118,69 @@ export async function touchSession(
   });
 }
 
-export async function loadHistoryAsMessages(
+export async function getActiveSession(
+  w: DbWorker,
+  projectId: string,
+): Promise<{ sessionId: string; isNew: boolean }> {
+  const res = await w.request({
+    id: 0,
+    type: "query",
+    sql: "SELECT id FROM agent_sessions WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1",
+    params: [projectId],
+  });
+  if (res.ok && res.data) {
+    const rows = res.data as Array<Record<string, unknown>>;
+    if (rows.length > 0) {
+      return { sessionId: rows[0]!["id"] as string, isNew: false };
+    }
+  }
+  return { sessionId: "", isNew: true };
+}
+
+export async function loadSnapshot(
   w: DbWorker,
   sessionId: string,
 ): Promise<ChatMessage[]> {
-  const rows = await loadHistory(w, sessionId);
-  return rows.map((row): ChatMessage => {
-    const msg: ChatMessage = { role: row.role as ChatMessage["role"], content: row.content };
-    const toolCalls = JSON.parse(row.toolCalls) as ToolCall[];
-    if (toolCalls.length > 0) msg.tool_calls = toolCalls;
-    if (row.toolCallId) msg.tool_call_id = row.toolCallId;
-    if (row.reasoningContent) msg.reasoning_content = row.reasoningContent;
-    return msg;
+  const res = await w.request({
+    id: 0,
+    type: "query",
+    sql: "SELECT snapshot FROM context_snapshots WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+    params: [sessionId],
+  });
+  if (!res.ok || !res.data) return [];
+  const rows = res.data as Array<Record<string, unknown>>;
+  if (rows.length === 0) return [];
+  try {
+    return JSON.parse(rows[0]!["snapshot"] as string) as ChatMessage[];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveSnapshot(
+  w: DbWorker,
+  projectId: string,
+  sessionId: string,
+  messages: readonly ChatMessage[],
+  tokenCount: number,
+  compressed: number,
+): Promise<void> {
+  await w.request({
+    id: 0,
+    type: "run",
+    sql: "INSERT INTO context_snapshots (project_id, session_id, snapshot, token_count, compressed) VALUES (?, ?, ?, ?, ?)",
+    params: [projectId, sessionId, JSON.stringify(messages), tokenCount, compressed],
+  });
+}
+
+export async function cleanOldSnapshots(
+  w: DbWorker,
+  sessionId: string,
+): Promise<void> {
+  await w.request({
+    id: 0,
+    type: "run",
+    sql: "DELETE FROM context_snapshots WHERE session_id = ? AND id NOT IN (SELECT id FROM context_snapshots WHERE session_id = ? ORDER BY id DESC LIMIT 20)",
+    params: [sessionId, sessionId],
   });
 }

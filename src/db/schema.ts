@@ -247,8 +247,26 @@ CREATE TABLE IF NOT EXISTS api_usage (
   cache_hit_tokens  INTEGER NOT NULL DEFAULT 0,
   cache_miss_tokens INTEGER NOT NULL DEFAULT 0,
   model             TEXT    NOT NULL DEFAULT '',
+  type              TEXT    NOT NULL DEFAULT 'chat',
   created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ============================================================
+-- context snapshots (LLM context state per turn)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS context_snapshots (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id  TEXT    NOT NULL,
+  session_id  TEXT    NOT NULL,
+  snapshot    TEXT    NOT NULL DEFAULT '[]',
+  token_count INTEGER NOT NULL DEFAULT 0,
+  compressed  INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_session
+  ON context_snapshots(session_id, id DESC);
 
 -- ============================================================
 -- projects (global registry, lives in projects.db)

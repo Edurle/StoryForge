@@ -1,4 +1,3 @@
-import { createApp, type ChatModelOptions } from "./index.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { createDbWorker } from "../db/worker.js";
 import { StoryForgeLoop, type StreamDeltaEvent } from "../agent/loop.js";
@@ -11,7 +10,8 @@ import { loadEndpoint } from "../../lib/reasonix-core/config.js";
 import { loadDotenv } from "../../lib/reasonix-core/env.js";
 import { recordUsage } from "../services/usage.js";
 import { DeepSeekClient, Usage } from "../../lib/reasonix-core/client.js";
-import { createSession, touchSession, getLatestSessionId, loadHistoryAsMessages } from "../services/history.js";
+import { getActiveSession, createSession, loadSnapshot, saveSnapshot } from "../services/history.js";
+import { createApp } from "./index.js";
 import { randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
@@ -39,6 +39,7 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
 const workers = new Map<string, ReturnType<typeof createDbWorker>>();
 const gate = new PauseGate();
+const loopCache = new Map<string, { loop: StoryForgeLoop; sessionId: string }>();
 
 function getDbWorker(projectId: string) {
   const existing = workers.get(projectId);
@@ -50,7 +51,10 @@ function getDbWorker(projectId: string) {
   return w;
 }
 
-async function createLoop(projectId: string, chatOpts: ChatModelOptions) {
+async function getOrCreateLoop(projectId: string) {
+  const cached = loopCache.get(projectId);
+  if (cached) return cached;
+
   const db = getDbWorker(projectId);
   const tools = createToolRegistry({ db, gate });
   const prefix = new ImmutablePrefix({
@@ -58,94 +62,76 @@ async function createLoop(projectId: string, chatOpts: ChatModelOptions) {
     toolSpecs: tools.specs(),
   });
 
-  let initialMessages: ChatMessage[] = [];
-  const prevSessionId = await getLatestSessionId(db);
-  if (prevSessionId) {
-    initialMessages = await loadHistoryAsMessages(db, prevSessionId);
+  const { sessionId, isNew } = await getActiveSession(db, projectId);
+  let sid = sessionId;
+  if (isNew) {
+    sid = randomUUID();
+    await createSession(db, sid, projectId, "");
   }
 
-  const sessionId = randomUUID();
-  await createSession(db, sessionId, chatOpts.model);
-  await touchSession(db, sessionId);
+  const initialMessages = await loadSnapshot(db, sid);
 
-  let onDeltaFn: ((event: StreamDeltaEvent) => void) | undefined;
+  const client = {
+    async chat(opts: any): Promise<any> {
+      const stream = dsClient.stream({
+        model: opts.model ?? "deepseek-chat",
+        messages: opts.messages,
+        tools: opts.tools,
+        thinking: opts.thinking ?? "disabled",
+        reasoningEffort: opts.reasoningEffort as ReasoningEffort | undefined,
+      });
 
-  const loop = new StoryForgeLoop({
-    client: {
-      async chat(opts: any) {
-        const thinking = chatOpts.thinking === "enabled" ? "enabled" as const : "disabled" as const;
-        const reasoningEffort = chatOpts.reasoningEffort as ReasoningEffort;
-        const stream = dsClient.stream({
-          model: opts.model ?? chatOpts.model,
-          messages: opts.messages,
-          tools: opts.tools,
-          thinking,
-          reasoningEffort,
-        });
+      let content = "";
+      let reasoningContent = "";
+      const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
+      let streamUsage: Usage | undefined;
 
-        let content = "";
-        let reasoningContent = "";
-        const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
-        let streamUsage: Usage | undefined;
-
-        for await (const chunk of stream) {
-          if (chunk.reasoningDelta) {
-            reasoningContent += chunk.reasoningDelta;
-            onDeltaFn?.({ type: "reasoning_delta", content: chunk.reasoningDelta });
-          }
-          if (chunk.contentDelta) {
-            content += chunk.contentDelta;
-            onDeltaFn?.({ type: "content_delta", content: chunk.contentDelta });
-          }
-          if (chunk.toolCallDelta) {
-            const idx = chunk.toolCallDelta.index;
-            if (chunk.toolCallDelta.id) {
-              toolCallMap.set(idx, {
-                id: chunk.toolCallDelta.id,
-                name: chunk.toolCallDelta.name ?? "",
-                args: chunk.toolCallDelta.argumentsDelta ?? "",
-              });
-            } else if (toolCallMap.has(idx) && chunk.toolCallDelta.argumentsDelta) {
-              toolCallMap.get(idx)!.args += chunk.toolCallDelta.argumentsDelta;
-            }
-          }
-          if (chunk.usage) streamUsage = chunk.usage;
+      for await (const chunk of stream) {
+        if (chunk.reasoningDelta) {
+          reasoningContent += chunk.reasoningDelta;
+          opts.onDelta?.({ type: "reasoning_delta", content: chunk.reasoningDelta });
         }
+        if (chunk.contentDelta) {
+          content += chunk.contentDelta;
+          opts.onDelta?.({ type: "content_delta", content: chunk.contentDelta });
+        }
+        if (chunk.toolCallDelta) {
+          const idx = chunk.toolCallDelta.index;
+          if (chunk.toolCallDelta.id) {
+            toolCallMap.set(idx, {
+              id: chunk.toolCallDelta.id,
+              name: chunk.toolCallDelta.name ?? "",
+              args: chunk.toolCallDelta.argumentsDelta ?? "",
+            });
+          } else if (toolCallMap.has(idx) && chunk.toolCallDelta.argumentsDelta) {
+            toolCallMap.get(idx)!.args += chunk.toolCallDelta.argumentsDelta;
+          }
+        }
+        if (chunk.usage) streamUsage = chunk.usage;
+      }
 
-        const toolCalls: ToolCall[] = [...toolCallMap.values()].map((tc) => ({
-          id: tc.id,
-          type: "function" as const,
-          function: { name: tc.name, arguments: tc.args },
-        }));
+      const toolCalls: ToolCall[] = [...toolCallMap.values()].map((tc) => ({
+        id: tc.id,
+        type: "function" as const,
+        function: { name: tc.name, arguments: tc.args },
+      }));
 
-        const usage = streamUsage ?? new Usage();
-        recordUsage(db, "default", {
-          promptTokens: usage.promptTokens,
-          completionTokens: usage.completionTokens,
-          cacheHitTokens: usage.promptCacheHitTokens,
-          cacheMissTokens: usage.promptCacheMissTokens,
-          model: chatOpts.model,
-        }).catch(() => {});
+      const usage = streamUsage ?? new Usage();
 
-        return {
-          content,
-          reasoningContent: reasoningContent || null,
-          toolCalls,
-          usage,
-          raw: {},
-        };
-      },
-      onDelta: undefined as ((event: StreamDeltaEvent) => void) | undefined,
+      return {
+        content,
+        reasoningContent: reasoningContent || null,
+        toolCalls,
+        usage,
+        raw: {},
+      };
     },
-    tools,
-    prefix,
-    model: chatOpts.model,
-    initialMessages,
-  });
-  return Object.assign(loop, {
-    sessionId,
-    setOnDelta(cb: ((event: StreamDeltaEvent) => void) | undefined) { onDeltaFn = cb; },
-  });
+  };
+
+  const loop = new StoryForgeLoop({ client, tools, prefix, initialMessages });
+  const entry = { loop, sessionId: sid };
+  loopCache.set(projectId, entry);
+  return entry;
 }
 
 const projectsDb = createDbWorker(resolve(dataDir, "projects.db"));
@@ -153,7 +139,7 @@ const projectsDb = createDbWorker(resolve(dataDir, "projects.db"));
 async function createAppWithDeps() {
   return createApp({
     getDbWorker,
-    createLoop,
+    getOrCreateLoop,
     projectsDb,
     gate,
   });
@@ -167,7 +153,11 @@ const server = app.listen(port, () => {
 });
 
 function shutdown() {
-  console.log("\n[Shutdown] Closing all DB workers...");
+  console.log("\n[Shutdown] Saving snapshots and closing...");
+  for (const [projectId, { loop, sessionId }] of loopCache) {
+    const db = getDbWorker(projectId);
+    saveSnapshot(db, projectId, sessionId, loop.getMessages(), loop.lastPromptTokenCount, 0).catch(() => {});
+  }
   server.close(() => {
     for (const w of workers.values()) w.close();
     projectsDb.close();

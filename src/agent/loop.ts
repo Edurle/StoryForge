@@ -26,6 +26,13 @@ export interface StreamDeltaEvent {
   content: string;
 }
 
+export interface CompressUsage {
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+}
+
 export type EngineEvent =
   | { type: "assistant"; content: string; reasoningContent?: string }
   | { type: "tool_call"; call: ToolCall }
@@ -34,7 +41,7 @@ export type EngineEvent =
   | { type: "done"; content: string }
   | { type: "error"; error: Error }
   | { type: "aborted" }
-  | { type: "compressed"; beforeTokens: number; afterTokens: number; summaryLevels: number };
+  | { type: "compressed"; beforeTokens: number; afterTokens: number; summaryLevels: number; compressUsage: CompressUsage };
 
 const COMPRESS_THRESHOLD = 200_000;
 const KEEP_RECENT_TURNS = 8;
@@ -58,15 +65,18 @@ function messagesToText(messages: readonly ChatMessage[]): string {
   }).join("\n\n");
 }
 
+export interface TurnOptions {
+  model?: string;
+  thinking?: "enabled" | "disabled";
+  reasoningEffort?: "high" | "max";
+  onDelta?: (event: StreamDeltaEvent) => void;
+}
+
 export interface StoryForgeLoopDeps {
-  client: {
-    chat(opts: any): Promise<ChatResponse>;
-    onDelta?: (event: StreamDeltaEvent) => void;
-  };
+  client: { chat(opts: any): Promise<ChatResponse> };
   tools: ToolRegistry;
   prefix: ImmutablePrefix;
   maxIter?: number;
-  model?: string;
   initialMessages?: ChatMessage[];
 }
 
@@ -75,21 +85,20 @@ export class StoryForgeLoop {
   private readonly tools: ToolRegistry;
   private readonly prefix: ImmutablePrefix;
   private readonly maxIter: number;
-  private readonly model: string;
   private readonly abortController = new AbortController();
   private readonly messages: ChatMessage[];
-  private lastPromptTokens = 0;
+  private _lastPromptTokens = 0;
 
   constructor(deps: StoryForgeLoopDeps) {
     this.client = deps.client;
     this.tools = deps.tools;
     this.prefix = deps.prefix;
     this.maxIter = deps.maxIter ?? 50;
-    this.model = deps.model ?? "deepseek-chat";
     this.messages = deps.initialMessages ? [...deps.initialMessages] : [];
   }
 
-  async *runTurn(userInput: string): AsyncGenerator<EngineEvent> {
+  async *runTurn(userInput: string, opts?: TurnOptions): AsyncGenerator<EngineEvent> {
+    const model = opts?.model ?? "deepseek-chat";
     this.messages.push({ role: "user", content: userInput });
 
     for (let iter = 0; iter < this.maxIter; iter++) {
@@ -101,16 +110,19 @@ export class StoryForgeLoop {
       let response: ChatResponse;
       try {
         response = await this.client.chat({
-          model: this.model,
+          model,
           messages: [...this.prefix.toMessages(), ...this.messages],
           tools: this.prefix.tools(),
+          thinking: opts?.thinking,
+          reasoningEffort: opts?.reasoningEffort,
+          onDelta: opts?.onDelta,
         });
       } catch (err) {
         yield { type: "error", error: err instanceof Error ? err : new Error(String(err)) };
         return;
       }
 
-      this.lastPromptTokens = response.usage.promptTokens;
+      this._lastPromptTokens = response.usage.promptTokens;
 
       const assistantMsg: ChatMessage = {
         role: "assistant",
@@ -139,8 +151,8 @@ export class StoryForgeLoop {
       };
 
       if (response.toolCalls.length === 0) {
-        if (this.lastPromptTokens > COMPRESS_THRESHOLD) {
-          const evt = await this.compressMessages();
+        if (this._lastPromptTokens > COMPRESS_THRESHOLD) {
+          const evt = await this.compressMessages(model);
           if (evt) yield evt;
         }
         yield { type: "done", content: response.content };
@@ -166,8 +178,8 @@ export class StoryForgeLoop {
     yield { type: "done", content: "" };
   }
 
-  private async compressMessages(): Promise<EngineEvent | null> {
-    const beforeTokens = this.lastPromptTokens;
+  private async compressMessages(model: string): Promise<EngineEvent | null> {
+    const beforeTokens = this._lastPromptTokens;
     const boundaries = collectTurnBoundaries(this.messages);
     if (boundaries.length <= KEEP_RECENT_TURNS) return null;
 
@@ -182,21 +194,35 @@ export class StoryForgeLoop {
     const middle = oldMessages.slice(midPoint);
 
     const summaries: string[] = [];
+    let compressPrompt = 0;
+    let compressCompletion = 0;
+    let compressCacheHit = 0;
+    let compressCacheMiss = 0;
 
     if (ancient.length > 0) {
-      const rough = await this.generateSummary(
+      const r = await this.generateSummary(
         messagesToText(ancient),
         "请将以下对话历史压缩为一段简短摘要（500字以内），保留关键事件、决策、角色状态变化和重要数值。忽略工具调用的技术细节，只保留结果。",
+        model,
       );
-      summaries.push(`[前情提要·早期]\n${rough}`);
+      summaries.push(`[前情提要·早期]\n${r.content}`);
+      compressPrompt += r.usage.promptTokens;
+      compressCompletion += r.usage.completionTokens;
+      compressCacheHit += r.usage.promptCacheHitTokens;
+      compressCacheMiss += r.usage.promptCacheMissTokens;
     }
 
     if (middle.length > 0) {
-      const detailed = await this.generateSummary(
+      const r = await this.generateSummary(
         messagesToText(middle),
         "请将以下对话历史压缩为详细摘要（2000字以内），保留重要细节、数值变化、因果关系、角色状态。忽略工具调用的技术细节，只保留结果。",
+        model,
       );
-      summaries.push(`[前情提要·近期]\n${detailed}`);
+      summaries.push(`[前情提要·近期]\n${r.content}`);
+      compressPrompt += r.usage.promptTokens;
+      compressCompletion += r.usage.completionTokens;
+      compressCacheHit += r.usage.promptCacheHitTokens;
+      compressCacheMiss += r.usage.promptCacheMissTokens;
     }
 
     const summaryContent = summaries.join("\n\n");
@@ -208,29 +234,61 @@ export class StoryForgeLoop {
 
     this.messages.length = 0;
     this.messages.push(...compressedMessages);
-    this.lastPromptTokens = 0;
+    this._lastPromptTokens = 0;
 
     const summaryLevels = (ancient.length > 0 ? 1 : 0) + (middle.length > 0 ? 1 : 0);
-    return { type: "compressed", beforeTokens, afterTokens: 0, summaryLevels };
+    return {
+      type: "compressed",
+      beforeTokens,
+      afterTokens: 0,
+      summaryLevels,
+      compressUsage: {
+        promptTokens: compressPrompt,
+        completionTokens: compressCompletion,
+        cacheHitTokens: compressCacheHit,
+        cacheMissTokens: compressCacheMiss,
+      },
+    };
   }
 
-  private async generateSummary(text: string, instruction: string): Promise<string> {
+  private async generateSummary(
+    text: string,
+    instruction: string,
+    model: string,
+  ): Promise<{ content: string; usage: { promptTokens: number; completionTokens: number; promptCacheHitTokens: number; promptCacheMissTokens: number } }> {
+    const empty = { content: "[摘要生成失败]", usage: { promptTokens: 0, completionTokens: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0 } };
     try {
       const resp = await this.client.chat({
-        model: this.model,
+        model,
         messages: [
           { role: "system", content: "你是一个对话摘要助手。根据用户提供的对话历史，生成简洁准确的摘要。" },
           { role: "user", content: `${instruction}\n\n---\n\n${text}` },
         ],
       });
-      return resp.content || "";
+      return {
+        content: resp.content || "",
+        usage: {
+          promptTokens: resp.usage.promptTokens,
+          completionTokens: resp.usage.completionTokens,
+          promptCacheHitTokens: resp.usage.promptCacheHitTokens,
+          promptCacheMissTokens: resp.usage.promptCacheMissTokens,
+        },
+      };
     } catch {
-      return "[摘要生成失败]";
+      return empty;
     }
   }
 
   getMessages(): readonly ChatMessage[] {
     return this.messages;
+  }
+
+  get messageCount(): number {
+    return this.messages.length;
+  }
+
+  get lastPromptTokenCount(): number {
+    return this._lastPromptTokens;
   }
 
   abort(): void {
