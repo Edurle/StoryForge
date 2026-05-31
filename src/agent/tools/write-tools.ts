@@ -512,11 +512,11 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "formula",
-    description: "公式管理。action: list（A级）列出公式，create（B级）创建公式，edit（B级）编辑公式。",
+    description: "公式管理。action: list（A级）列出公式，query（A级）查询单公式，create（B级）创建公式，edit（B级）编辑公式。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：list | create | edit" },
+        action: { type: "string", description: "操作：list | query | create | edit" },
         name: { type: "string", description: "公式名" },
         template: { type: "string", description: "公式模板" },
         vars: { type: "string", description: "变量说明" },
@@ -528,6 +528,13 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
       if (args.action === "list") {
         const result = await queryFormulas(db);
         return JSON.stringify(result);
+      }
+      if (args.action === "query") {
+        if (!args.name) return JSON.stringify({ error: "name required for query" });
+        const result = await queryFormulas(db);
+        const found = result.find(f => f.name === args.name);
+        if (!found) return JSON.stringify(null);
+        return JSON.stringify(found);
       }
       if (args.action === "create") {
         if (!args.name) return JSON.stringify({ error: "name required for create" });

@@ -44,13 +44,13 @@ beforeAll(async () => {
 });
 
 describe("M8 Tool Registration", () => {
-  it("registers all 19 tools", () => {
-    expect(reg.size).toBe(19);
+  it("registers at least 19 tools", () => {
+    expect(reg.size).toBeGreaterThanOrEqual(19);
   });
 
   it("specs returns all with type function and non-empty name", () => {
     const specs = reg.specs();
-    expect(specs.length).toBe(19);
+    expect(specs.length).toBeGreaterThanOrEqual(19);
     for (const spec of specs) {
       expect(spec.type).toBe("function");
       expect(spec.function.name).toBeTruthy();

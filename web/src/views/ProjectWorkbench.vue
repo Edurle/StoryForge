@@ -23,7 +23,7 @@
         <span>自动批准写入</span>
       </label>
       <button @click="layout.toggleLeft()">{{ layout.leftCollapsed ? "▶" : "◀" }} 知识库</button>
-      <button @click="layout.toggleRight()">{{ layout.rightCollapsed ? "◀" : "▶" }} 编辑器</button>
+      <button @click="layout.toggleRight()">{{ layout.rightCollapsed ? "◀" : "▶" }} 章节</button>
     </header>
     <div class="panels">
       <aside v-show="!layout.leftCollapsed" class="left-panel">
@@ -150,7 +150,7 @@
       <aside v-show="!layout.rightCollapsed" class="right-panel">
         <div class="panel-header">
           章节
-          <a v-if="chapters.length > 0" :href="api.getExportUrl(props.id)" download="export.txt" class="panel-action-btn">导出 TXT</a>
+          <a v-if="chapters.length > 0" :href="api.getExportUrl(props.id)" :download="(projectStore.currentName || 'export') + '.txt'" class="panel-action-btn">导出 TXT</a>
         </div>
         <div class="chapter-tree" v-if="chapters.length > 0">
           <div v-for="vol in volumes" :key="vol" class="chapter-volume">
