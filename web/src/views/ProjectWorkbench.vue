@@ -3,20 +3,21 @@
     <header>
       <router-link to="/" class="back-link">← 返回</router-link>
       <span class="project-name">{{ projectStore.currentName }}</span>
-      <span class="usage-stats" v-if="usage.totalCalls > 0">
+      <span class="usage-stats">
         对话: {{ usage.totalCalls }}次
         · 输入 {{ (usage.totalPromptTokens / 1000).toFixed(1) }}k
         · 输出 {{ (usage.totalCompletionTokens / 1000).toFixed(1) }}k
+        · 缓存 {{ cachePercent }}%
         · ¥{{ usage.totalCostYuan.toFixed(4) }}
-        <span v-if="compressUsage.totalCalls > 0" style="margin-left: 8px;">
+        <span style="margin-left: 8px;">
           压缩: {{ compressUsage.totalCalls }}次
           · ¥{{ compressUsage.totalCostYuan.toFixed(4) }}
         </span>
-        <span class="ctx-bar" v-if="lastContextTokens > 0">
-          <span class="ctx-fill" :class="ctxClass" :style="{ width: ctxPercent + '%' }"></span>
-        </span>
-        <span class="ctx-label" v-if="lastContextTokens > 0">{{ (lastContextTokens / 1000).toFixed(0) }}k/1M</span>
       </span>
+      <span class="ctx-bar">
+        <span class="ctx-fill" :class="ctxClass" :style="{ width: ctxPercent + '%' }"></span>
+      </span>
+      <span class="ctx-label">{{ (lastContextTokens / 1000).toFixed(0) }}k/1M</span>
       <label class="auto-approve-toggle">
         <input type="checkbox" v-model="autoApproveB" />
         <span>自动批准写入</span>
@@ -342,6 +343,10 @@ async function loadHistory() {
         }
         messages.value.push(display);
       }
+    }
+    const lastWithUsage = [...messages.value].reverse().find(m => m.usage);
+    if (lastWithUsage?.usage) {
+      lastContextTokens.value = lastWithUsage.usage.promptTokens;
     }
     scrollToBottom();
   } catch {}
