@@ -5,6 +5,7 @@ import type { DbWorker } from "../db/worker.js";
 import type { StoryForgeLoop } from "../agent/loop.js";
 import type { UsageInfo } from "../agent/loop.js";
 import type { StreamDeltaEvent } from "../agent/loop.js";
+import type { PauseGate } from "../../lib/reasonix-core/core/pause-gate.js";
 import { errorHandler } from "./middleware/error.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { getUsageSummary } from "../services/usage.js";
@@ -23,6 +24,7 @@ export interface ServerDeps {
     setOnDelta: (cb: ((event: StreamDeltaEvent) => void) | undefined) => void;
   }>;
   projectsDb: DbWorker;
+  gate: PauseGate;
 }
 
 export async function resetProjects(deps: ServerDeps): Promise<void> {
@@ -132,6 +134,10 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
       res.write(`event: ${delta.type}\ndata: ${JSON.stringify({ content: delta.content })}\n\n`);
     });
 
+    const offGate = deps.gate.on((req) => {
+      res.write(`event: gate_request\ndata: ${JSON.stringify({ id: req.id, kind: req.kind, payload: req.payload })}\n\n`);
+    });
+
     try {
       for await (const event of loop.runTurn(message)) {
         if (event.type === "usage") {
@@ -155,10 +161,21 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
         }
       }
     } finally {
+      offGate();
       const db = deps.getDbWorker(projectId);
       saveMessages(db, loop.sessionId, loop.getMessages(), usageMap).catch(() => {});
       res.end();
     }
+  });
+
+  app.post("/api/projects/:projectId/gate/:requestId/resolve", (req, res) => {
+    const requestId = parseInt((req.params as Record<string, string | undefined>).requestId!, 10);
+    if (isNaN(requestId)) {
+      res.status(400).json({ error: "invalid requestId" });
+      return;
+    }
+    deps.gate.resolve(requestId, req.body);
+    res.json({ ok: true });
   });
 
   app.get("/api/projects/:projectId/system-prompt", (_req: Request, res: Response) => {

@@ -3,6 +3,7 @@ import request from "supertest";
 import { createApp, resetProjects } from "../index.js";
 import type { ServerDeps } from "../index.js";
 import { createDbWorker } from "../../db/worker.js";
+import { PauseGate } from "../../../lib/reasonix-core/core/pause-gate.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,12 +12,18 @@ let testDbDir: string;
 let testProjectsDb: ReturnType<typeof createDbWorker>;
 
 function createMockDeps(): ServerDeps {
+  const gate = new PauseGate();
+  gate.on((req) => {
+    if (req.kind === "plan_proposed") gate.resolve(req.id, { type: "approve" });
+    else if (req.kind === "plan_checkpoint") gate.resolve(req.id, { type: "continue" });
+  });
   return {
     getDbWorker: vi.fn().mockReturnValue({
       request: async () => ({ ok: true, data: [] }),
     }),
     createLoop: vi.fn(),
     projectsDb: testProjectsDb,
+    gate,
   };
 }
 

@@ -87,4 +87,11 @@ export const api = {
       .catch(() => {});
     return ctrl;
   },
+  async resolveGate(projectId: string, requestId: number, verdict: Record<string, unknown>): Promise<void> {
+    await fetch(`${BACKEND}/${projectId}/gate/${requestId}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(verdict),
+    });
+  },
 };

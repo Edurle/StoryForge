@@ -40,15 +40,6 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 const workers = new Map<string, ReturnType<typeof createDbWorker>>();
 const gate = new PauseGate();
 
-gate.on((req) => {
-  console.log(`[PauseGate] ${req.kind}: ${JSON.stringify(req.payload)}`);
-  if (req.kind === "plan_proposed") {
-    gate.resolve(req.id, { type: "approve" });
-  } else if (req.kind === "plan_checkpoint") {
-    gate.resolve(req.id, { type: "continue" });
-  }
-});
-
 function getDbWorker(projectId: string) {
   const existing = workers.get(projectId);
   if (existing) return existing;
@@ -164,6 +155,7 @@ async function createAppWithDeps() {
     getDbWorker,
     createLoop,
     projectsDb,
+    gate,
   });
 }
 

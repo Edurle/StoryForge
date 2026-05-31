@@ -6,6 +6,10 @@
       <span class="usage-stats" v-if="usage.totalCalls > 0">
         📊 {{ usage.totalCalls }}次 · {{ ((usage.totalPromptTokens + usage.totalCompletionTokens) / 1000).toFixed(1) }}k tokens
       </span>
+      <label class="auto-approve-toggle">
+        <input type="checkbox" v-model="autoApproveB" />
+        <span>自动批准写入</span>
+      </label>
       <button @click="layout.toggleLeft()">{{ layout.leftCollapsed ? "▶" : "◀" }} 知识库</button>
       <button @click="layout.toggleRight()">{{ layout.rightCollapsed ? "◀" : "▶" }} 编辑器</button>
     </header>
@@ -98,6 +102,18 @@
         </div>
       </aside>
     </div>
+    <div v-if="gateRequest" class="gate-overlay">
+      <div class="gate-dialog">
+        <div class="gate-title">
+          {{ gateRequest.kind === 'plan_proposed' ? '操作确认' : '重要操作确认' }}
+        </div>
+        <div class="gate-body">{{ (gateRequest.payload as Record<string, unknown>).summary ?? (gateRequest.payload as Record<string, unknown>).result ?? JSON.stringify(gateRequest.payload) }}</div>
+        <div class="gate-actions">
+          <button class="gate-cancel" @click="resolveGate(false)">拒绝</button>
+          <button class="gate-approve" @click="resolveGate(true)">确认</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -138,6 +154,8 @@ const currentThinking = ref("enabled");
 const currentEffort = ref("high");
 const activeKbTab = ref("全部");
 const kbTabs = ["全部", "角色", "设定", "时间线", "公式"];
+const autoApproveB = ref(false);
+const gateRequest = ref<{ id: number; kind: string; payload: unknown } | null>(null);
 let lastUsage: UsageInfo | undefined;
 
 function usagePercent(u: UsageInfo): string {
@@ -260,6 +278,13 @@ async function send() {
       const data = event.data as { name: string; result: string };
       messages.value.push({ role: "tool", content: `${data.name}: ${data.result}` });
       scrollToBottom();
+    } else if (event.type === "gate_request") {
+      const data = event.data as { id: number; kind: string; payload: unknown };
+      if (data.kind === "plan_proposed" && autoApproveB.value) {
+        api.resolveGate(props.id, data.id, { type: "approve" });
+      } else {
+        gateRequest.value = data;
+      }
     } else if (event.type === "done") {
       pendingMsg = undefined;
       sending.value = false;
@@ -276,6 +301,19 @@ async function send() {
     thinking: currentThinking.value,
     reasoning_effort: currentEffort.value,
   });
+}
+
+async function resolveGate(approve: boolean) {
+  if (!gateRequest.value) return;
+  const { id, kind } = gateRequest.value;
+  gateRequest.value = null;
+  let verdict: Record<string, unknown>;
+  if (kind === "plan_proposed") {
+    verdict = approve ? { type: "approve" } : { type: "cancel" };
+  } else {
+    verdict = approve ? { type: "continue" } : { type: "stop" };
+  }
+  await api.resolveGate(props.id, id, verdict);
 }
 </script>
 
@@ -316,6 +354,21 @@ header {
   margin-left: auto;
   white-space: nowrap;
 }
+.auto-approve-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: #9ca3af;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.auto-approve-toggle input {
+  accent-color: #6366f1;
+  cursor: pointer;
+}
+.auto-approve-toggle:hover { color: #6b7280; }
 header button {
   padding: 0.25rem 0.6rem;
   border: 1px solid #e5e7eb;
@@ -696,4 +749,62 @@ header button:hover { background: #f3f4f6; color: #374151; }
   margin-top: 2rem;
   font-size: 0.85rem;
 }
+
+.gate-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.gate-dialog {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  min-width: 340px;
+  max-width: 480px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+}
+.gate-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 0.6rem;
+}
+.gate-body {
+  font-size: 0.88rem;
+  color: #374151;
+  line-height: 1.5;
+  margin-bottom: 1.2rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.gate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.gate-cancel {
+  padding: 0.4rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.gate-cancel:hover { background: #f3f4f6; }
+.gate-approve {
+  padding: 0.4rem 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #6366f1;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.gate-approve:hover { background: #4f46e5; }
 </style>
