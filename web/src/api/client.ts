@@ -122,6 +122,20 @@ export const api = {
   getExportUrl(projectId: string): string {
     return `${BACKEND}/${projectId}/export`;
   },
+  async abort(projectId: string): Promise<void> {
+    await fetch(`${BACKEND}/${projectId}/chat/abort`, { method: "DELETE" });
+  },
+  async getChapterSegments(projectId: string, chapterId: number): Promise<Array<{ id: number; seq: number; content: string }>> {
+    const res = await fetch(`${BACKEND}/${projectId}/chapters/${chapterId}/segments`);
+    return res.json();
+  },
+  async reorderSegments(projectId: string, chapterId: number, segmentIds: number[]): Promise<void> {
+    await fetch(`${BACKEND}/${projectId}/chapters/${chapterId}/segments/reorder`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segmentIds }),
+    });
+  },
   async getKnowledgeGraph(projectId: string): Promise<{
     nodes: Array<{ id: string; type: string; label: string }>;
     edges: Array<{ source_id: string; target_id: string; type: string; source_label: string; target_label: string }>;
