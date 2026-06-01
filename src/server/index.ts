@@ -12,7 +12,7 @@ import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { getUsageSummary, getCompressUsageSummary } from "../services/usage.js";
 import { recordUsage } from "../services/usage.js";
 import { loadHistory, saveMessages, saveSnapshot, cleanOldSnapshots, getNextSeq, touchSession } from "../services/history.js";
-import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations, queryChapters, queryChapterContent, queryKgGraph } from "../services/knowledge.js";
+import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations, queryChapters, queryChapterContent, queryChapterSegments, reorderSegments, queryKgGraph } from "../services/knowledge.js";
 
 export interface ServerDeps {
   getDbWorker: (projectId: string) => DbWorker;
@@ -34,7 +34,7 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
   const app = express();
   app.use((_req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     if (_req.method === "OPTIONS") { res.status(204).end(); return; }
     next();
@@ -259,6 +259,25 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     const db = deps.getDbWorker(projectId);
     const content = await queryChapterContent(db, chapterId);
     res.json({ chapterId, content });
+  });
+
+  app.get("/api/projects/:projectId/chapters/:chapterId/segments", async (req, res) => {
+    const projectId = (req.params as Record<string, string | undefined>).projectId!;
+    const chapterId = parseInt((req.params as Record<string, string | undefined>).chapterId!, 10);
+    if (isNaN(chapterId)) { res.status(400).json({ error: "invalid chapterId" }); return; }
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryChapterSegments(db, chapterId));
+  });
+
+  app.put("/api/projects/:projectId/chapters/:chapterId/segments/reorder", async (req, res) => {
+    const projectId = (req.params as Record<string, string | undefined>).projectId!;
+    const chapterId = parseInt((req.params as Record<string, string | undefined>).chapterId!, 10);
+    if (isNaN(chapterId)) { res.status(400).json({ error: "invalid chapterId" }); return; }
+    const segmentIds = req.body.segmentIds;
+    if (!Array.isArray(segmentIds)) { res.status(400).json({ error: "segmentIds must be an array" }); return; }
+    const db = deps.getDbWorker(projectId);
+    await reorderSegments(db, chapterId, segmentIds as number[]);
+    res.json({ ok: true });
   });
 
   app.get("/api/projects/:projectId/export", async (_req, res) => {

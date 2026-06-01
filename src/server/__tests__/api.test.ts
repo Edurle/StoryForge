@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import request from "supertest";
 import { createApp, resetProjects } from "../index.js";
 import type { ServerDeps } from "../index.js";
@@ -262,5 +262,66 @@ describe("Chapter routes", () => {
     const res = await request(app).get("/api/projects/test-id/export");
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("text/plain");
+  });
+});
+
+describe("Segment routes", () => {
+  let segDbDir: string;
+  let segDb: ReturnType<typeof createDbWorker>;
+  let app: Awaited<ReturnType<typeof createApp>>;
+
+  beforeEach(async () => {
+    segDbDir = mkdtempSync(join(tmpdir(), "sf-seg-"));
+    segDb = createDbWorker(join(segDbDir, "seg-test.db"));
+    await segDb.request({ id: 0, type: "run", sql: "INSERT INTO chapters (volume, title, status) VALUES (1, 'Test Chapter', 'draft')", params: [] });
+    await segDb.request({ id: 0, type: "run", sql: "INSERT INTO segments (chapter_id, seq, type, content) VALUES (1, 0, 'narration', 'First paragraph')", params: [] });
+    await segDb.request({ id: 0, type: "run", sql: "INSERT INTO segments (chapter_id, seq, type, content) VALUES (1, 1, 'narration', 'Second paragraph')", params: [] });
+    await segDb.request({ id: 0, type: "run", sql: "INSERT INTO segments (chapter_id, seq, type, content) VALUES (1, 2, 'narration', 'Third paragraph')", params: [] });
+
+    const gate = new PauseGate();
+    gate.on((req) => {
+      if (req.kind === "plan_proposed") gate.resolve(req.id, { type: "approve" });
+      else if (req.kind === "plan_checkpoint") gate.resolve(req.id, { type: "continue" });
+    });
+    const deps: ServerDeps = {
+      getDbWorker: () => segDb,
+      getOrCreateLoop: vi.fn(),
+      projectsDb: testProjectsDb,
+      gate,
+    };
+    app = await createApp(deps);
+  });
+
+  afterEach(() => {
+    segDb.close();
+    try { rmSync(segDbDir, { recursive: true, force: true }); } catch {}
+  });
+
+  it("GET segments returns segments for a chapter", async () => {
+    const res = await request(app).get("/api/projects/test-id/chapters/1/segments");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(3);
+    expect(res.body[0].content).toBe("First paragraph");
+    expect(res.body[1].content).toBe("Second paragraph");
+    expect(res.body[2].content).toBe("Third paragraph");
+  });
+
+  it("PUT reorder updates the seq order", async () => {
+    const segsBefore = await request(app).get("/api/projects/test-id/chapters/1/segments");
+    const ids = segsBefore.body.map((s: any) => s.id);
+    const reordered = [ids[2], ids[1], ids[0]];
+
+    const putRes = await request(app)
+      .put("/api/projects/test-id/chapters/1/segments/reorder")
+      .send({ segmentIds: reordered });
+    expect(putRes.status).toBe(200);
+    expect(putRes.body).toEqual({ ok: true });
+
+    const segsAfter = await request(app).get("/api/projects/test-id/chapters/1/segments");
+    expect(segsAfter.body).toHaveLength(3);
+    expect(segsAfter.body[0].content).toBe("Third paragraph");
+    expect(segsAfter.body[1].content).toBe("Second paragraph");
+    expect(segsAfter.body[2].content).toBe("First paragraph");
   });
 });

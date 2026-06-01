@@ -238,6 +238,24 @@ export async function queryChapters(w: DbWorker): Promise<ChapterSummary[]> {
   }));
 }
 
+export async function queryChapterSegments(w: DbWorker, chapterId: number): Promise<Array<{ id: number; seq: number; content: string }>> {
+  const res = await w.request({
+    id: 0,
+    type: "query",
+    sql: "SELECT id, seq, content FROM segments WHERE chapter_id = ? ORDER BY seq, id",
+    params: [chapterId],
+  });
+  if (!res.ok || !res.data) return [];
+  return res.data as Array<{ id: number; seq: number; content: string }>;
+}
+
+export async function reorderSegments(w: DbWorker, chapterId: number, orderedIds: number[]): Promise<void> {
+  const stmts = orderedIds.map((id, idx) =>
+    w.request({ id: 0, type: "run", sql: "UPDATE segments SET seq = ? WHERE id = ? AND chapter_id = ?", params: [idx, id, chapterId] })
+  );
+  await Promise.all(stmts);
+}
+
 export async function queryChapterContent(w: DbWorker, chapterId: number): Promise<string> {
   const res = await w.request({
     id: 0,
