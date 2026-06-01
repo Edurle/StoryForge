@@ -120,6 +120,10 @@ export class StoryForgeLoop {
           onDelta: opts?.onDelta,
         });
       } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          yield { type: "aborted" };
+          return;
+        }
         yield { type: "error", error: err instanceof Error ? err : new Error(String(err)) };
         return;
       }

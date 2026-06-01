@@ -189,6 +189,22 @@ describe("StoryForgeLoop", () => {
     expect(final.done).toBe(true);
   });
 
+  it("yields aborted when client.chat throws AbortError", async () => {
+    const { chatMock, client, tools, prefix } = createMocks();
+
+    const abortErr = new Error("The operation was aborted");
+    abortErr.name = "AbortError";
+    chatMock.mockRejectedValue(abortErr);
+
+    const loop = new StoryForgeLoop({ client, tools, prefix });
+    const events = await collectEvents(loop, "test");
+
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("aborted");
+    const errorEvents = events.filter((e: any) => e.type === "error");
+    expect(errorEvents).toHaveLength(0);
+  });
+
   it("yields error event on API failure and terminates", async () => {
     const { chatMock, client, tools, prefix } = createMocks();
 
