@@ -143,7 +143,8 @@
                 <option value="max">Max</option>
               </select>
             </div>
-            <button class="send-btn" @click="send" :disabled="sending">发送</button>
+            <button v-if="sending" class="stop-btn" @click="stopChat">停止</button>
+            <button v-else class="send-btn" @click="send" :disabled="!input.trim()">发送</button>
           </div>
         </div>
       </main>
@@ -166,7 +167,21 @@
         <div v-else class="editor-placeholder">暂无章节，通过对话让 AI 创建。</div>
         <div v-if="selectedChapterId != null" class="chapter-content-area">
           <div v-if="chapterLoading" class="editor-placeholder">加载中...</div>
-          <pre v-else class="chapter-text">{{ chapterContent }}</pre>
+          <div v-else class="segment-list">
+            <draggable
+              v-model="chapterSegments"
+              item-key="id"
+              handle=".seg-handle"
+              @end="handleSegmentReorder"
+            >
+              <template #item="{ element }">
+                <div class="segment-item">
+                  <span class="seg-handle" title="拖拽排序">⋮⋮</span>
+                  <pre class="segment-text">{{ element.content }}</pre>
+                </div>
+              </template>
+            </draggable>
+          </div>
         </div>
       </aside>
     </div>
@@ -192,6 +207,7 @@ import { useProjectStore } from "@/stores/project.js";
 import { api } from "@/api/client.js";
 import { marked } from "marked";
 import RelationGraph from "@/components/RelationGraph.vue";
+import draggable from "vuedraggable";
 
 interface UsageInfo {
   promptTokens: number;
@@ -227,6 +243,8 @@ const chapters = ref<Array<{ id: number; volume: number; title: string; status: 
 const selectedChapterId = ref<number | null>(null);
 const chapterContent = ref("");
 const chapterLoading = ref(false);
+const chatCtrl = ref<AbortController | null>(null);
+const chapterSegments = ref<Array<{ id: number; seq: number; content: string }>>([]);
 const kbTabs = ["全部", "角色", "设定", "时间线", "公式", "关系图", "提示词"];
 const kbData = ref<{
   characters: Array<{ name: string; stage: string; attrs: Record<string, unknown> }>;
@@ -284,19 +302,41 @@ async function selectChapter(id: number) {
   if (selectedChapterId.value === id) {
     selectedChapterId.value = null;
     chapterContent.value = "";
+    chapterSegments.value = [];
     return;
   }
   selectedChapterId.value = id;
   chapterLoading.value = true;
   chapterContent.value = "";
+  chapterSegments.value = [];
   try {
-    const res = await api.getChapterContent(props.id, id);
-    chapterContent.value = res.content;
+    chapterSegments.value = await api.getChapterSegments(props.id, id);
+    chapterContent.value = chapterSegments.value.map(s => s.content).join("\n\n");
   } catch {
     chapterContent.value = "加载失败";
   } finally {
     chapterLoading.value = false;
   }
+}
+
+async function handleSegmentReorder() {
+  if (selectedChapterId.value == null) return;
+  const ids = chapterSegments.value.map(s => s.id);
+  try {
+    await api.reorderSegments(props.id, selectedChapterId.value, ids);
+    chapterSegments.value = chapterSegments.value.map((s, i) => ({ ...s, seq: i }));
+  } catch {}
+}
+
+async function stopChat() {
+  if (chatCtrl.value) {
+    chatCtrl.value.abort();
+    chatCtrl.value = null;
+  }
+  await api.abort(props.id);
+  sending.value = false;
+  loadKnowledge();
+  loadChapters();
 }
 
 const autoApproveB = ref(false);
@@ -428,7 +468,7 @@ async function send() {
 
   let pendingMsg: DisplayMessage | undefined;
 
-  api.chat(props.id, text, (event) => {
+  chatCtrl.value = api.chat(props.id, text, (event) => {
     if (event.type === "reasoning_delta") {
       const delta = event.data as { content: string };
       if (!pendingMsg) {
@@ -495,6 +535,7 @@ async function send() {
     } else if (event.type === "done") {
       pendingMsg = undefined;
       sending.value = false;
+      chatCtrl.value = null;
       loadUsage();
       loadKnowledge();
       loadChapters();
@@ -503,7 +544,16 @@ async function send() {
       const data = event.data as { error: string };
       messages.value.push({ role: "error", content: data.error });
       sending.value = false;
+      chatCtrl.value = null;
       scrollToBottom();
+    } else if (event.type === "aborted") {
+      pendingMsg = undefined;
+      sending.value = false;
+      chatCtrl.value = null;
+      messages.value.push({ role: "tool", content: "⏹ 已停止" });
+      scrollToBottom();
+      loadKnowledge();
+      loadChapters();
     }
   }, {
     model: currentModel.value,
@@ -1082,4 +1132,53 @@ header button:hover { background: #f3f4f6; color: #374151; }
   cursor: pointer;
 }
 .gate-approve:hover { background: #4f46e5; }
+.stop-btn {
+  padding: 0.35rem 1rem;
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.stop-btn:hover { background: #dc2626; }
+.segment-list {
+  padding: 0.6rem;
+}
+.segment-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border: 1px solid #f3f4f6;
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.segment-item:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.seg-handle {
+  cursor: grab;
+  color: #d1d5db;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.1rem;
+  user-select: none;
+  flex-shrink: 0;
+  line-height: 1.6;
+}
+.seg-handle:active { cursor: grabbing; }
+.segment-text {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: #1f2937;
+  flex: 1;
+}
 </style>
