@@ -162,6 +162,8 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
           res.write(`event: done\ndata: ${JSON.stringify({ content: event.content })}\n\n`);
         } else if (event.type === "error") {
           res.write(`event: error\ndata: ${JSON.stringify({ error: event.error.message })}\n\n`);
+        } else if (event.type === "aborted") {
+          res.write(`event: aborted\ndata: {}\n\n`);
         }
       }
     } finally {
@@ -205,6 +207,17 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     }
     deps.gate.resolve(requestId, req.body);
     res.json({ ok: true });
+  });
+
+  app.delete("/api/projects/:projectId/chat/abort", async (req, res) => {
+    try {
+      const projectId = (req.params as Record<string, string | undefined>).projectId!;
+      const { loop } = await deps.getOrCreateLoop(projectId);
+      loop.abort();
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: (err instanceof Error ? err.message : String(err)) });
+    }
   });
 
   app.get("/api/projects/:projectId/system-prompt", (_req: Request, res: Response) => {

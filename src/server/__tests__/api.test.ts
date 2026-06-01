@@ -218,6 +218,24 @@ describe("Chat SSE error handling", () => {
     expect(res.text).toContain("模型过载");
     assertNoApiKeyLeak(res.text);
   });
+
+  it("DELETE /api/projects/:id/chat/abort calls loop.abort and returns 200", async () => {
+    const abortFn = vi.fn();
+    const mockLoop = {
+      messageCount: 0,
+      lastPromptTokenCount: 0,
+      getMessages: () => [],
+      async *runTurn() { yield { type: "done", content: "" }; },
+      abort: abortFn,
+    };
+    deps.getOrCreateLoop = vi.fn().mockResolvedValue({ loop: mockLoop, sessionId: "test-session-abort" });
+
+    const res = await request(app).delete("/api/projects/test-id/chat/abort");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(abortFn).toHaveBeenCalledOnce();
+    assertNoApiKeyLeak(JSON.stringify(res.body));
+  });
 });
 
 describe("Chapter routes", () => {
