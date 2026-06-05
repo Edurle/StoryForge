@@ -42,8 +42,8 @@
             </div>
           </template>
           <template v-else-if="activeKbTab === '关系图'">
-            <div v-if="graphData.nodes.length > 0" class="kb-cards">
-              <RelationGraph :nodes="graphNodes" :edges="graphEdges" :width="340" :height="300" />
+            <div v-if="graphData.nodes.length > 0" class="kb-graph-container">
+              <RelationGraph :nodes="graphNodes" :edges="graphEdges" />
             </div>
             <div v-else class="kb-empty">暂无关系数据</div>
           </template>
@@ -235,7 +235,7 @@ const systemPrompt = ref("");
 const usage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 });
 const compressUsage = ref({ totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalCacheHitTokens: 0, totalCostYuan: 0 });
 const messagesContainer = ref<HTMLElement | null>(null);
-const currentModel = ref("deepseek-v4-flash");
+const currentModel = ref("deepseek-v4-pro");
 const currentThinking = ref("enabled");
 const currentEffort = ref("high");
 const activeKbTab = ref("全部");
@@ -339,7 +339,7 @@ async function stopChat() {
   loadChapters();
 }
 
-const autoApproveB = ref(false);
+const autoApproveB = ref(true);
 const gateRequest = ref<{ id: number; kind: string; payload: unknown } | null>(null);
 let lastUsage: UsageInfo | undefined;
 const lastContextTokens = ref(0);
@@ -727,6 +727,8 @@ header button:hover { background: #f3f4f6; color: #374151; }
 .kb-list {
   flex: 1;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .system-prompt-content {
@@ -738,6 +740,8 @@ header button:hover { background: #f3f4f6; color: #374151; }
 }
 
 .kb-cards { padding: 0.4rem 0; }
+.kb-graph-container { flex: 1; display: flex; flex-direction: column; padding: 0.4rem 0.6rem; min-height: 0; }
+.kb-graph-container .relation-graph { flex: 1; min-height: 0; }
 .kb-card {
   margin: 0.4rem 0.6rem;
   padding: 0.5rem 0.6rem;

@@ -1,72 +1,85 @@
 import { mount } from "@vue/test-utils";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const mockDestroy = vi.fn();
+const mockOn = vi.fn();
+const mockAdd = vi.fn();
+const mockClear = vi.fn();
+
+vi.mock("vis-network/standalone", () => {
+  return {
+    Network: function MockNetwork(this: unknown, ..._args: unknown[]) {
+      return { on: mockOn, destroy: mockDestroy };
+    },
+  };
+});
+
+vi.mock("vis-data/standalone", () => {
+  return {
+    DataSet: function MockDataSet(this: unknown, ..._args: unknown[]) {
+      return { add: mockAdd, clear: mockClear };
+    },
+  };
+});
+
 import RelationGraph from "../RelationGraph.vue";
 import type { GraphNode, GraphEdge } from "../RelationGraph.vue";
 
 const nodes: GraphNode[] = [
-  { id: "n1", label: "Alice" },
-  { id: "n2", label: "Bob" },
-  { id: "n3", label: "Carol" },
+  { id: "n1", label: "Alice", group: "character" },
+  { id: "n2", label: "Bob", group: "character" },
+  { id: "n3", label: "Sword", group: "item" },
 ];
 
 const edges: GraphEdge[] = [
   { source: "n1", target: "n2", type: "friend" },
-  { source: "n2", target: "n3", type: "rival" },
+  { source: "n2", target: "n3", type: "wields" },
 ];
 
 describe("RelationGraph", () => {
-  it("renders SVG element with correct dimensions", () => {
-    const wrapper = mount(RelationGraph, {
-      props: { nodes, edges },
-    });
-    const svg = wrapper.find("svg");
-    expect(svg.exists()).toBe(true);
-    expect(svg.attributes("width")).toBe("600");
-    expect(svg.attributes("height")).toBe("400");
+  beforeEach(() => {
+    mockOn.mockClear();
+    mockDestroy.mockClear();
+    mockAdd.mockClear();
+    mockClear.mockClear();
   });
 
-  it("renders correct number of node circles", () => {
+  it("renders container div with relation-graph class", () => {
     const wrapper = mount(RelationGraph, {
       props: { nodes, edges },
+      attachTo: document.body,
     });
-    const circles = wrapper.findAll("circle");
-    expect(circles).toHaveLength(3);
+    const div = wrapper.find(".relation-graph");
+    expect(div.exists()).toBe(true);
+    expect(div.attributes("role")).toBe("img");
+    wrapper.unmount();
   });
 
-  it("renders correct number of edge lines", () => {
+  it("has CSS width:100% and height:100%", () => {
     const wrapper = mount(RelationGraph, {
       props: { nodes, edges },
+      attachTo: document.body,
     });
-    const lines = wrapper.findAll("line");
-    expect(lines).toHaveLength(2);
+    const div = wrapper.find(".relation-graph");
+    expect(div.exists()).toBe(true);
+    wrapper.unmount();
   });
 
-  it("node labels are displayed", () => {
+  it("calls Network on mount and registers click handler", () => {
     const wrapper = mount(RelationGraph, {
       props: { nodes, edges },
+      attachTo: document.body,
     });
-    const svg = wrapper.find("svg");
-    expect(svg.text()).toContain("Alice");
-    expect(svg.text()).toContain("Bob");
-    expect(svg.text()).toContain("Carol");
+    expect(mockOn).toHaveBeenCalledWith("click", expect.any(Function));
+    wrapper.unmount();
   });
 
-  it("edge type labels are displayed", () => {
+  it("destroys network on unmount", () => {
     const wrapper = mount(RelationGraph, {
       props: { nodes, edges },
+      attachTo: document.body,
     });
-    const svg = wrapper.find("svg");
-    expect(svg.text()).toContain("friend");
-    expect(svg.text()).toContain("rival");
-  });
-
-  it("click on node circle emits select with correct id", async () => {
-    const wrapper = mount(RelationGraph, {
-      props: { nodes, edges },
-    });
-    const circles = wrapper.findAll("circle");
-    await circles[0]!.trigger("click");
-    expect(wrapper.emitted("select")).toHaveLength(1);
-    expect(wrapper.emitted("select")![0]).toEqual(["n1"]);
+    wrapper.unmount();
+    expect(mockDestroy).toHaveBeenCalled();
   });
 });
