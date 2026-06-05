@@ -468,7 +468,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "setting",
-    description: "全局设定管理。action: list（A级）列出设定，query（A级）查询设定，write（B级）写入设定，upsert 策略。",
+    description: "全局设定管理。action: list（A级）列出设定，query（A级）查询设定，write（B级）写入设定，upsert 策略。写入时必须指定 tag 分类，如：技能、能力、道具、装备、奇遇、世界观、修炼体系等。tag 由你根据小说类型和内容自行决定，确保同类设定归入同一 tag。",
     parameters: {
       type: "object",
       properties: {
@@ -476,14 +476,15 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         key: { type: "string", description: "设定键名" },
         value: { type: "string", description: "设定值" },
         description: { type: "string", description: "说明" },
+        tag: { type: "string", description: "设定分类标签，如：技能、能力、道具、装备、奇遇、世界观、修炼体系等。write 时必填。" },
       },
       required: ["action"],
     },
-    fn: async (args: { action: string; key?: string; value?: string; description?: string }) => {
+    fn: async (args: { action: string; key?: string; value?: string; description?: string; tag?: string }) => {
       if (args.action === "list") {
         const res = await db.request({
           id: 0, type: "query",
-          sql: "SELECT key, value, description FROM global_constants ORDER BY key",
+          sql: "SELECT key, value, description, tag FROM global_constants ORDER BY tag, key",
         });
         if (!res.ok || !res.data) return JSON.stringify([]);
         return JSON.stringify(res.data);
@@ -495,16 +496,16 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
       }
       if (args.action === "write") {
         if (!args.key || !args.value) return JSON.stringify({ error: "key and value required for write" });
-        const summary = `写入设定 "${args.key}"`;
+        const summary = `写入设定 "${args.key}" (tag: ${args.tag || "未分类"})`;
         const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
         if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
         await db.request({
           id: 0,
           type: "run",
-          sql: "INSERT INTO global_constants (key, value, description) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, description = excluded.description",
-          params: [args.key, args.value, args.description ?? ""],
+          sql: "INSERT INTO global_constants (key, value, description, tag) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, description = excluded.description, tag = excluded.tag",
+          params: [args.key, args.value, args.description ?? "", args.tag ?? ""],
         });
-        return JSON.stringify({ success: true, key: args.key });
+        return JSON.stringify({ success: true, key: args.key, tag: args.tag ?? "" });
       }
       return JSON.stringify({ error: `unknown action: ${args.action}` });
     },

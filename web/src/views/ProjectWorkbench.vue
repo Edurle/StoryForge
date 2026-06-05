@@ -56,9 +56,12 @@
                 </div>
               </template>
               <template v-if="activeKbTab === '全部' || activeKbTab === '设定'">
-                <div v-for="s in kbData.settings" :key="'s-'+s.topic" class="kb-card">
-                  <div class="kb-card-header"><span class="kb-card-name">{{ s.topic }}</span></div>
-                  <div class="kb-card-content">{{ s.content }}</div>
+                <div v-for="[group, items] of settingGroups" :key="'sg-'+group" class="kb-group">
+                  <div class="kb-group-header">{{ group }}</div>
+                  <div v-for="s in items" :key="'s-'+s.topic" class="kb-card">
+                    <div class="kb-card-header"><span class="kb-card-name">{{ s.topic }}</span></div>
+                    <div class="kb-card-content">{{ s.content }}</div>
+                  </div>
                 </div>
               </template>
               <template v-if="activeKbTab === '全部' || activeKbTab === '时间线'">
@@ -248,7 +251,7 @@ const chapterSegments = ref<Array<{ id: number; seq: number; content: string }>>
 const kbTabs = ["全部", "角色", "设定", "时间线", "公式", "关系图", "提示词"];
 const kbData = ref<{
   characters: Array<{ name: string; stage: string; attrs: Record<string, unknown> }>;
-  settings: Array<{ topic: string; content: string }>;
+  settings: Array<{ topic: string; content: string; tag: string }>;
   timeline: Array<{ id: string; time: string; description: string; characters: string[] }>;
   formulas: Array<{ name: string; template: string; vars: string }>;
   items: Array<{ name: string; type: string; attrs: Record<string, unknown> }>;
@@ -270,6 +273,16 @@ const isKbEmpty = computed(() => {
 });
 
 const volumes = computed(() => [...new Set(chapters.value.map(c => c.volume))].sort((a, b) => (a as number) - (b as number)));
+
+const settingGroups = computed(() => {
+  const groups = new Map<string, Array<{ topic: string; content: string; tag: string }>>();
+  for (const s of kbData.value.settings) {
+    const key = s.tag || "未分类";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(s);
+  }
+  return groups;
+});
 
 function chaptersByVolume(vol: number) {
   return chapters.value.filter(c => c.volume === vol);
@@ -752,6 +765,7 @@ header button:hover { background: #f3f4f6; color: #374151; }
   cursor: default;
 }
 .kb-card:hover { border-color: #d1d5db; }
+.kb-group-header { font-size: 0.8rem; font-weight: 700; color: #6b7280; padding: 0.4rem 0 0.2rem 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 0.4rem; margin-top: 0.4rem; }
 .kb-card-header { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem; }
 .kb-card-name { font-weight: 600; color: #111827; }
 .kb-card-badge {

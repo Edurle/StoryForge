@@ -21,6 +21,7 @@ export interface RelationResult {
 export interface SettingResult {
   topic: string;
   content: string;
+  tag: string;
 }
 
 export interface FormulaResult {
@@ -69,14 +70,14 @@ export async function querySetting(w: DbWorker, topic: string): Promise<SettingR
   const res = await w.request({
     id: 0,
     type: "query",
-    sql: "SELECT key, value FROM global_constants WHERE key = ?",
+    sql: "SELECT key, value, tag FROM global_constants WHERE key = ?",
     params: [topic],
   });
   if (!res.ok || !res.data) return null;
-  const rows = res.data as { key: string; value: string }[];
+  const rows = res.data as { key: string; value: string; tag: string }[];
   const row = rows[0];
   if (!row) return null;
-  return { topic: row.key, content: row.value };
+  return { topic: row.key, content: row.value, tag: row.tag };
 }
 
 export async function queryTimeline(w: DbWorker, range: { from: string; to: string }): Promise<TimelineEvent[]> {
@@ -188,11 +189,11 @@ export async function queryAllSettings(w: DbWorker): Promise<SettingResult[]> {
   const res = await w.request({
     id: 0,
     type: "query",
-    sql: "SELECT key, value FROM global_constants ORDER BY key",
+    sql: "SELECT key, value, tag FROM global_constants ORDER BY tag, key",
   });
   if (!res.ok || !res.data) return [];
-  const rows = res.data as { key: string; value: string }[];
-  return rows.map(row => ({ topic: row.key, content: row.value }));
+  const rows = res.data as { key: string; value: string; tag: string }[];
+  return rows.map(row => ({ topic: row.key, content: row.value, tag: row.tag }));
 }
 
 export async function queryAllTimeline(w: DbWorker): Promise<TimelineEvent[]> {

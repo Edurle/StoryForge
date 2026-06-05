@@ -2,6 +2,10 @@ import type Database from "better-sqlite3";
 
 export function migrate(db: Database.Database): void {
   db.exec(SCHEMA);
+  const cols = db.prepare("PRAGMA table_info(global_constants)").all() as Array<{ name: string }>;
+  if (!cols.some(c => c.name === "tag")) {
+    db.exec("ALTER TABLE global_constants ADD COLUMN tag TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 const SCHEMA = `
@@ -169,7 +173,8 @@ CREATE TABLE IF NOT EXISTS card_templates (
 CREATE TABLE IF NOT EXISTS global_constants (
   key         TEXT    PRIMARY KEY,
   value       TEXT    NOT NULL,
-  description TEXT    NOT NULL DEFAULT ''
+  description TEXT    NOT NULL DEFAULT '',
+  tag         TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS formulas (
