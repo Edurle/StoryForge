@@ -87,6 +87,7 @@ export class StoryForgeLoop {
   private readonly maxIter: number;
   private readonly abortController = new AbortController();
   private readonly messages: ChatMessage[];
+  private readonly contextMessages: ChatMessage[];
   private _lastPromptTokens = 0;
 
   constructor(deps: StoryForgeLoopDeps) {
@@ -94,12 +95,16 @@ export class StoryForgeLoop {
     this.tools = deps.tools;
     this.prefix = deps.prefix;
     this.maxIter = deps.maxIter ?? 50;
-    this.messages = deps.initialMessages ? [...deps.initialMessages] : [];
+    const init = deps.initialMessages ? [...deps.initialMessages] : [];
+    this.messages = [...init];
+    this.contextMessages = [...init];
   }
 
   async *runTurn(userInput: string, opts?: TurnOptions): AsyncGenerator<EngineEvent> {
     const model = opts?.model ?? "deepseek-chat";
-    this.messages.push({ role: "user", content: userInput });
+    const userMsg: ChatMessage = { role: "user", content: userInput };
+    this.messages.push(userMsg);
+    this.contextMessages.push(userMsg);
 
     for (let iter = 0; iter < this.maxIter; iter++) {
       if (this.abortController.signal.aborted) {
@@ -109,11 +114,11 @@ export class StoryForgeLoop {
 
       let response: ChatResponse;
       try {
-        const contextMessages = [...this.prefix.toMessages(), ...this.messages];
-        console.log(`[Loop] Sending ${contextMessages.length} messages to LLM (model=${model}, snapshot=${this.messages.length} msgs, prefix=${this.prefix.toMessages().length} msgs)`);
+        const llmMessages = [...this.prefix.toMessages(), ...this.contextMessages];
+        console.log(`[Loop] Sending ${llmMessages.length} messages to LLM (model=${model}, context=${this.contextMessages.length} msgs, display=${this.messages.length} msgs, prefix=${this.prefix.toMessages().length} msgs)`);
         response = await this.client.chat({
           model,
-          messages: contextMessages,
+          messages: llmMessages,
           tools: this.prefix.tools(),
           thinking: opts?.thinking,
           reasoningEffort: opts?.reasoningEffort,
@@ -139,6 +144,7 @@ export class StoryForgeLoop {
         assistantMsg.tool_calls = response.toolCalls;
       }
       this.messages.push(assistantMsg);
+      this.contextMessages.push(assistantMsg);
 
       yield {
         type: "usage",
@@ -172,11 +178,13 @@ export class StoryForgeLoop {
           call.function.arguments,
           { signal: this.abortController.signal },
         );
-        this.messages.push({
+        const toolMsg: ChatMessage = {
           role: "tool",
           tool_call_id: call.id,
           content: result,
-        });
+        };
+        this.messages.push(toolMsg);
+        this.contextMessages.push(toolMsg);
         yield { type: "tool_result", call, result };
       }
     }
@@ -186,14 +194,14 @@ export class StoryForgeLoop {
 
   private async compressMessages(model: string): Promise<EngineEvent | null> {
     const beforeTokens = this._lastPromptTokens;
-    const boundaries = collectTurnBoundaries(this.messages);
+    const boundaries = collectTurnBoundaries(this.contextMessages);
     if (boundaries.length <= KEEP_RECENT_TURNS) return null;
 
     const recentStart = boundaries[boundaries.length - KEEP_RECENT_TURNS]!;
     if (recentStart <= 2) return null;
 
-    const oldMessages = this.messages.slice(0, recentStart);
-    const recentMessages = this.messages.slice(recentStart);
+    const oldMessages = this.contextMessages.slice(0, recentStart);
+    const recentMessages = this.contextMessages.slice(recentStart);
 
     const midPoint = Math.floor(oldMessages.length / 2);
     const ancient = oldMessages.slice(0, midPoint);
@@ -232,21 +240,20 @@ export class StoryForgeLoop {
     }
 
     const summaryContent = summaries.join("\n\n");
-    const compressedMessages: ChatMessage[] = [
+    const compressed: ChatMessage[] = [
       { role: "user", content: `[系统自动压缩的上下文摘要]\n\n${summaryContent}` },
       { role: "assistant", content: "已了解前情提要，我会基于以上上下文继续创作。" },
       ...recentMessages,
     ];
 
-    this.messages.length = 0;
-    this.messages.push(...compressedMessages);
-    this._lastPromptTokens = 0;
+    this.contextMessages.length = 0;
+    this.contextMessages.push(...compressed);
 
     const summaryLevels = (ancient.length > 0 ? 1 : 0) + (middle.length > 0 ? 1 : 0);
     return {
       type: "compressed",
       beforeTokens,
-      afterTokens: 0,
+      afterTokens: compressCompletion,
       summaryLevels,
       compressUsage: {
         promptTokens: compressPrompt,
@@ -287,6 +294,10 @@ export class StoryForgeLoop {
 
   getMessages(): readonly ChatMessage[] {
     return this.messages;
+  }
+
+  getContextMessages(): readonly ChatMessage[] {
+    return this.contextMessages;
   }
 
   get messageCount(): number {

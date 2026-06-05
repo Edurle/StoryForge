@@ -125,6 +125,7 @@ describe("Chat SSE", () => {
       messageCount: 0,
       lastPromptTokenCount: 0,
       getMessages: () => [{ role: "user", content: "查询叶凡" }, { role: "assistant", content: "叶凡在筑基九层" }],
+      getContextMessages: () => [{ role: "user", content: "查询叶凡" }, { role: "assistant", content: "叶凡在筑基九层" }],
       async *runTurn(_input: string) {
         yield { type: "usage", usage: { promptTokens: 100, completionTokens: 50, cacheHitTokens: 80, cacheMissTokens: 20 } };
         yield { type: "assistant", content: "查询中..." };
@@ -152,6 +153,7 @@ describe("Chat SSE", () => {
       messageCount: 0,
       lastPromptTokenCount: 0,
       getMessages: () => [],
+      getContextMessages: () => [],
       async *runTurn(_input: string, opts: any) {
         yield { type: "done", content: `model:${opts?.model}` };
       },
@@ -202,6 +204,7 @@ describe("Chat SSE error handling", () => {
       messageCount: 0,
       lastPromptTokenCount: 0,
       getMessages: () => [{ role: "user", content: "测试错误" }, { role: "assistant", content: "" }],
+      getContextMessages: () => [{ role: "user", content: "测试错误" }, { role: "assistant", content: "" }],
       async *runTurn(_input: string) {
         yield { type: "error", error: new Error("模型过载") };
       },
@@ -225,6 +228,7 @@ describe("Chat SSE error handling", () => {
       messageCount: 0,
       lastPromptTokenCount: 0,
       getMessages: () => [],
+      getContextMessages: () => [],
       async *runTurn() { yield { type: "done", content: "" }; },
       abort: abortFn,
     };

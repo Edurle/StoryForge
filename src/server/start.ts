@@ -163,7 +163,7 @@ function shutdown() {
   console.log("\n[Shutdown] Saving snapshots and closing...");
   for (const [projectId, { loop, sessionId }] of loopCache) {
     const db = getDbWorker(projectId);
-    saveSnapshot(db, projectId, sessionId, loop.getMessages(), loop.lastPromptTokenCount, 0).catch(() => {});
+    saveSnapshot(db, projectId, sessionId, loop.getContextMessages(), loop.lastPromptTokenCount, 0).catch(() => {});
   }
   server.close(() => {
     for (const w of workers.values()) w.close();

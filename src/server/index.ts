@@ -174,7 +174,7 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
       const startSeq = await getNextSeq(db, sessionId);
 
       saveMessages(db, sessionId, newMessages, startSeq, usageMap).catch(() => {});
-      saveSnapshot(db, projectId, sessionId, allMessages, loop.lastPromptTokenCount, wasCompressed ? 1 : 0).catch(() => {});
+      saveSnapshot(db, projectId, sessionId, loop.getContextMessages(), loop.lastPromptTokenCount, wasCompressed ? 1 : 0).catch(() => {});
       cleanOldSnapshots(db, sessionId).catch(() => {});
       touchSession(db, sessionId).catch(() => {});
       if (compressUsageInfo) {

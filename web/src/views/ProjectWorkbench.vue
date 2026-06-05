@@ -269,7 +269,7 @@ const isKbEmpty = computed(() => {
   return d.characters.length + d.settings.length + d.timeline.length + d.formulas.length + d.items.length + d.factions.length + d.locations.length === 0;
 });
 
-const volumes = computed(() => [...new Set(chapters.value.map(c => c.volume))].sort());
+const volumes = computed(() => [...new Set(chapters.value.map(c => c.volume))].sort((a, b) => (a as number) - (b as number)));
 
 function chaptersByVolume(vol: number) {
   return chapters.value.filter(c => c.volume === vol);
