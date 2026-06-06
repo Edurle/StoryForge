@@ -3,6 +3,13 @@
     <header>
       <router-link to="/" class="back-link">← 返回</router-link>
       <span class="project-name">{{ projectStore.currentName }}</span>
+      <span class="progress-info" v-if="projectStats">
+        <span class="progress-label">{{ formatWords(projectStats.wordCount) }} / {{ formatTarget(projectStats.targetWords) }}</span>
+        <span class="progress-bar-mini">
+          <span class="progress-fill-mini" :style="{ width: Math.min(projectStats.progress * 100, 100) + '%' }"></span>
+        </span>
+        <span class="progress-percent">{{ (projectStats.progress * 100).toFixed(1) }}%</span>
+      </span>
       <span class="usage-stats">
         对话: {{ usage.totalCalls }}次
         · 输入 {{ (usage.totalPromptTokens / 1000).toFixed(1) }}k
@@ -163,7 +170,7 @@
               :class="['chapter-item', { active: selectedChapterId === ch.id }]"
               @click="selectChapter(ch.id)">
               <span class="chapter-title">{{ ch.title }}</span>
-              <span class="chapter-segments">{{ ch.segmentCount }}段</span>
+              <span class="chapter-segments">{{ ch.segmentCount }}段 · {{ formatWords(ch.wordCount) }}</span>
             </div>
           </div>
         </div>
@@ -242,8 +249,9 @@ const currentModel = ref("deepseek-v4-pro");
 const currentThinking = ref("enabled");
 const currentEffort = ref("high");
 const activeKbTab = ref("全部");
-const chapters = ref<Array<{ id: number; volume: number; title: string; status: string; segmentCount: number }>>([]);
+const chapters = ref<Array<{ id: number; volume: number; title: string; status: string; segmentCount: number; wordCount: number }>>([]);
 const selectedChapterId = ref<number | null>(null);
+const projectStats = ref<{ wordCount: number; targetWords: number; progress: number; chapterCount: number } | null>(null);
 const chapterContent = ref("");
 const chapterLoading = ref(false);
 const chatCtrl = ref<AbortController | null>(null);
@@ -311,6 +319,22 @@ async function loadChapters() {
   } catch {}
 }
 
+async function loadStats() {
+  try {
+    projectStats.value = await api.getStats(props.id);
+  } catch {}
+}
+
+function formatWords(n: number): string {
+  if (n >= 10000) return (n / 10000).toFixed(1) + "万";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+  return String(n);
+}
+
+function formatTarget(n: number): string {
+  return (n / 10000).toFixed(0) + "万";
+}
+
 async function selectChapter(id: number) {
   if (selectedChapterId.value === id) {
     selectedChapterId.value = null;
@@ -350,6 +374,7 @@ async function stopChat() {
   sending.value = false;
   loadKnowledge();
   loadChapters();
+  loadStats();
 }
 
 const autoApproveB = ref(true);
@@ -465,6 +490,7 @@ async function loadHistory() {
   projectStore.setCurrent(props.id);
   loadSystemPrompt();
   loadUsage();
+  loadStats();
   loadHistory();
    loadKnowledge();
    loadChapters();
@@ -619,6 +645,37 @@ header {
   font-weight: 600;
   font-size: 0.9rem;
   color: #111827;
+}
+.progress-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 0.5rem;
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+.progress-label {
+  white-space: nowrap;
+}
+.progress-bar-mini {
+  display: inline-block;
+  width: 80px;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill-mini {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #818cf8);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.progress-percent {
+  font-weight: 600;
+  color: #6366f1;
+  white-space: nowrap;
 }
 .usage-stats {
   font-size: 0.72rem;

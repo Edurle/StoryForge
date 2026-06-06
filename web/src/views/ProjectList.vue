@@ -7,12 +7,20 @@
     <div class="home-body">
       <div class="create-bar">
         <input v-model="newName" class="create-input" placeholder="输入新项目名称…" @keyup.enter="create" />
+        <input v-model.number="newTargetWords" class="create-input create-input-sm" type="number" placeholder="目标字数(万)" min="1" />
         <button class="create-btn" @click="create" :disabled="!newName.trim()">创建项目</button>
       </div>
       <div v-if="store.projects.length > 0" class="project-grid">
         <div v-for="p in store.projects" :key="p.id" class="project-card" @click="go(p.id)">
           <button class="card-delete" @click.stop="confirmDelete(p.id, p.name)" title="删除项目">×</button>
           <div class="card-name">{{ p.name }}</div>
+          <div class="card-progress-row">
+            <span class="card-meta">{{ formatWords(p.wordCount ?? 0) }} / {{ formatTarget(p.targetWords) }}</span>
+            <span class="card-percent">{{ ((p.wordCount ?? 0) / p.targetWords * 100).toFixed(1) }}%</span>
+          </div>
+          <div class="card-progress-bar">
+            <div class="card-progress-fill" :style="{ width: Math.min((p.wordCount ?? 0) / p.targetWords * 100, 100) + '%' }"></div>
+          </div>
           <div class="card-meta">{{ formatDate(p.createdAt) }}</div>
         </div>
       </div>
@@ -44,6 +52,7 @@ import { api } from "@/api/client.js";
 const store = useProjectStore();
 const router = useRouter();
 const newName = ref("");
+const newTargetWords = ref(1000);
 const deleteTarget = ref<{ id: string; name: string } | null>(null);
 
 onMounted(() => {
@@ -52,7 +61,7 @@ onMounted(() => {
 
 async function create() {
   if (!newName.value.trim()) return;
-  await store.createProject(newName.value.trim());
+  await store.createProject(newName.value.trim(), (newTargetWords.value || 1000) * 10000);
   newName.value = "";
 }
 
@@ -67,6 +76,15 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function formatWords(n: number): string {
+  if (n >= 10000) return (n / 10000).toFixed(1) + "万";
+  return String(n);
+}
+
+function formatTarget(n: number): string {
+  return (n / 10000).toFixed(0) + "万";
 }
 
 function confirmDelete(id: string, name: string) {
@@ -134,6 +152,9 @@ async function doDelete() {
   color: #1f2937;
   transition: border-color 0.2s;
 }
+.create-input-sm {
+  flex: 0 0 130px;
+}
 .create-input::placeholder { color: #b0b8c4; }
 .create-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
 .create-btn {
@@ -182,6 +203,30 @@ async function doDelete() {
 .card-meta {
   font-size: 0.78rem;
   color: #b0b8c4;
+}
+.card-progress-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.3rem;
+}
+.card-percent {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6366f1;
+}
+.card-progress-bar {
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 0.4rem;
+}
+.card-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #818cf8);
+  border-radius: 2px;
+  transition: width 0.4s ease;
 }
 .card-delete {
   position: absolute;

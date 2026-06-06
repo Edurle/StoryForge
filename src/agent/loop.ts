@@ -213,11 +213,13 @@ export class StoryForgeLoop {
     let compressCacheHit = 0;
     let compressCacheMiss = 0;
 
+    const compressModel = "deepseek-v4-flash";
+
     if (ancient.length > 0) {
       const r = await this.generateSummary(
         messagesToText(ancient),
         "请将以下对话历史压缩为一段简短摘要（500字以内），保留关键事件、决策、角色状态变化和重要数值。忽略工具调用的技术细节，只保留结果。",
-        model,
+        compressModel,
       );
       summaries.push(`[前情提要·早期]\n${r.content}`);
       compressPrompt += r.usage.promptTokens;
@@ -230,7 +232,7 @@ export class StoryForgeLoop {
       const r = await this.generateSummary(
         messagesToText(middle),
         "请将以下对话历史压缩为详细摘要（2000字以内），保留重要细节、数值变化、因果关系、角色状态。忽略工具调用的技术细节，只保留结果。",
-        model,
+        compressModel,
       );
       summaries.push(`[前情提要·近期]\n${r.content}`);
       compressPrompt += r.usage.promptTokens;

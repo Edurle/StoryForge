@@ -278,8 +278,9 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_session
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS projects (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  target_words INTEGER NOT NULL DEFAULT 10000000,
+  created_at   TEXT NOT NULL
 );
 `;

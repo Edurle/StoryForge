@@ -13,6 +13,7 @@ import { getUsageSummary, getCompressUsageSummary } from "../services/usage.js";
 import { recordUsage } from "../services/usage.js";
 import { loadHistory, saveMessages, saveSnapshot, cleanOldSnapshots, getNextSeq, touchSession } from "../services/history.js";
 import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations, queryChapters, queryChapterContent, queryChapterSegments, reorderSegments, queryKgGraph } from "../services/knowledge.js";
+import { computeWordCount } from "../agent/tools/query-tools.js";
 
 export interface ServerDeps {
   getDbWorker: (projectId: string) => DbWorker;
@@ -41,22 +42,39 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
   });
   app.use(express.json());
 
-  const projects = new Map<string, { id: string; name: string; createdAt: string }>();
+  const projects = new Map<string, { id: string; name: string; targetWords: number; createdAt: string }>();
 
   const loadRes = await deps.projectsDb.request({
     id: 0,
     type: "query",
-    sql: "SELECT id, name, created_at FROM projects ORDER BY created_at ASC",
+    sql: "SELECT id, name, target_words, created_at FROM projects ORDER BY created_at ASC",
     params: [],
   });
   if (loadRes.ok && loadRes.data) {
-    for (const row of loadRes.data as Array<Record<string, string>>) {
-      projects.set(row["id"]!, { id: row["id"]!, name: row["name"]!, createdAt: row["created_at"]! });
+    for (const row of loadRes.data as Array<Record<string, string | number>>) {
+      projects.set(row["id"] as string, {
+        id: row["id"] as string,
+        name: row["name"] as string,
+        targetWords: (row["target_words"] as number) ?? 10000000,
+        createdAt: row["created_at"] as string,
+      });
     }
   }
 
-  app.get("/api/projects", (_req, res) => {
-    res.json([...projects.values()]);
+  app.get("/api/projects", async (_req, res) => {
+    const list = [];
+    for (const p of projects.values()) {
+      const db = deps.getDbWorker(p.id);
+      const wordCount = await computeWordCount(db);
+      list.push({
+        id: p.id,
+        name: p.name,
+        targetWords: p.targetWords,
+        wordCount,
+        createdAt: p.createdAt,
+      });
+    }
+    res.json(list);
   });
 
   app.post("/api/projects", async (req, res) => {
@@ -65,16 +83,17 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
       res.status(400).json({ error: "name is required" });
       return;
     }
+    const targetWords = (req.body.targetWords as number | undefined) ?? 10000000;
     const id = randomUUID();
-    const project = { id, name, createdAt: new Date().toISOString() };
+    const project = { id, name, targetWords, createdAt: new Date().toISOString() };
     await deps.projectsDb.request({
       id: 0,
       type: "run",
-      sql: "INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)",
-      params: [id, name, project.createdAt],
+      sql: "INSERT INTO projects (id, name, target_words, created_at) VALUES (?, ?, ?, ?)",
+      params: [id, name, targetWords, project.createdAt],
     });
     projects.set(id, project);
-    res.status(201).json(project);
+    res.status(201).json({ id: project.id, name: project.name, targetWords: project.targetWords, createdAt: project.createdAt });
   });
 
   app.get("/api/projects/:id", (req, res) => {
@@ -102,6 +121,31 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     });
     projects.delete(id);
     res.status(204).end();
+  });
+
+  app.get("/api/projects/:id/stats", async (req, res) => {
+    const projectId = (req.params as Record<string, string | undefined>).id!;
+    const project = projects.get(projectId);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const db = deps.getDbWorker(projectId);
+    const wordCount = await computeWordCount(db);
+    const chapters = await queryChapters(db);
+    res.json({
+      wordCount,
+      targetWords: project.targetWords,
+      progress: project.targetWords > 0 ? wordCount / project.targetWords : 0,
+      chapterCount: chapters.length,
+      chapters: chapters.map(ch => ({
+        id: ch.id,
+        title: ch.title,
+        volume: ch.volume,
+        wordCount: ch.wordCount,
+        segmentCount: ch.segmentCount,
+      })),
+    });
   });
 
   app.post("/api/projects/:projectId/chat", async (req, res) => {
@@ -249,7 +293,15 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
   app.get("/api/projects/:projectId/chapters", async (_req, res) => {
     const projectId = (_req.params as Record<string, string | undefined>).projectId!;
     const db = deps.getDbWorker(projectId);
-    res.json(await queryChapters(db));
+    const chapters = await queryChapters(db);
+    res.json(chapters.map(ch => ({
+      id: ch.id,
+      volume: ch.volume,
+      title: ch.title,
+      status: ch.status,
+      segmentCount: ch.segmentCount,
+      wordCount: ch.wordCount,
+    })));
   });
 
   app.get("/api/projects/:projectId/chapters/:chapterId/content", async (req, res) => {

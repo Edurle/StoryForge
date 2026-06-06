@@ -3,8 +3,6 @@ import type { PauseGate } from "../../../lib/reasonix-core/core/pause-gate.js";
 import type { DbWorker } from "../../db/worker.js";
 import { registerQueryTools } from "./query-tools.js";
 import { registerCalcTools } from "./calc-tools.js";
-import { registerValidateTools } from "./validate-tools.js";
-import { registerSkillTools } from "./skill-tools.js";
 import { registerWriteTools } from "./write-tools.js";
 
 export function createToolRegistry(deps: {
@@ -14,8 +12,6 @@ export function createToolRegistry(deps: {
   const reg = new ToolRegistry();
   registerQueryTools(reg, deps.db);
   registerCalcTools(reg, deps.db);
-  registerValidateTools(reg, deps.db);
-  registerSkillTools(reg, deps.db, deps.gate);
   registerWriteTools(reg, deps.db, deps.gate);
   return reg;
 }

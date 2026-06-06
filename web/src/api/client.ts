@@ -2,15 +2,15 @@ const BASE = "/api/projects";
 const BACKEND = `${import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8888"}/api/projects`;
 
 export const api = {
-  async getProjects(): Promise<Array<{ id: string; name: string; createdAt: string }>> {
+  async getProjects(): Promise<Array<{ id: string; name: string; targetWords: number; createdAt: string }>> {
     const res = await fetch(`${BASE}`);
     return res.json();
   },
-  async createProject(name: string): Promise<{ id: string; name: string; createdAt: string }> {
+  async createProject(name: string, targetWords?: number): Promise<{ id: string; name: string; targetWords: number; createdAt: string }> {
     const res = await fetch(`${BASE}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, targetWords }),
     });
     return res.json();
   },
@@ -110,7 +110,7 @@ export const api = {
     return res.json();
   },
   async getChapters(projectId: string): Promise<Array<{
-    id: number; volume: number; title: string; status: string; segmentCount: number;
+    id: number; volume: number; title: string; status: string; segmentCount: number; wordCount: number;
   }>> {
     const res = await fetch(`${BACKEND}/${projectId}/chapters`);
     return res.json();
@@ -135,6 +135,16 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ segmentIds }),
     });
+  },
+  async getStats(projectId: string): Promise<{
+    wordCount: number;
+    targetWords: number;
+    progress: number;
+    chapterCount: number;
+    chapters: Array<{ id: number; title: string; volume: number; wordCount: number; segmentCount: number }>;
+  }> {
+    const res = await fetch(`${BASE}/${projectId}/stats`);
+    return res.json();
   },
   async getKnowledgeGraph(projectId: string): Promise<{
     nodes: Array<{ id: string; type: string; label: string }>;

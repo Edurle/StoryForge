@@ -8,13 +8,11 @@ import {
   seedTimeline,
   seedRelations,
   seedFormulas,
-  seedSkills,
   seedSettings,
   STANDARD_CHARS,
   STANDARD_TIMELINE,
   STANDARD_RELATIONS,
   STANDARD_FORMULAS,
-  STANDARD_SKILLS,
 } from "../../../services/__tests__/helpers.js";
 
 const testDb = setupTestDb();
@@ -28,7 +26,6 @@ beforeAll(async () => {
   await seedTimeline(w, STANDARD_TIMELINE);
   await seedRelations(w, STANDARD_RELATIONS);
   await seedFormulas(w, STANDARD_FORMULAS);
-  await seedSkills(w, STANDARD_SKILLS);
   await seedSettings(w, [{ topic: "world_rules", content: "修仙界通用规则" }]);
 
   gate = new PauseGate();
@@ -44,13 +41,13 @@ beforeAll(async () => {
 });
 
 describe("M8 Tool Registration", () => {
-  it("registers at least 19 tools", () => {
-    expect(reg.size).toBeGreaterThanOrEqual(19);
+  it("registers at least 16 tools", () => {
+    expect(reg.size).toBeGreaterThanOrEqual(16);
   });
 
   it("specs returns all with type function and non-empty name", () => {
     const specs = reg.specs();
-    expect(specs.length).toBeGreaterThanOrEqual(19);
+    expect(specs.length).toBeGreaterThanOrEqual(16);
     for (const spec of specs) {
       expect(spec.type).toBe("function");
       expect(spec.function.name).toBeTruthy();
@@ -111,85 +108,6 @@ describe("A-level Query Tools", () => {
   });
 });
 
-describe("A-level Skill Tools", () => {
-  it("skill get with seeded skill returns content", async () => {
-    const result = await reg.dispatch("skill", { action: "get", name: "battle" });
-    const parsed = JSON.parse(result);
-    expect(parsed.content).toContain("战斗场景创作指南");
-  });
-
-  it("skill get with nonexistent returns error JSON", async () => {
-    const result = await reg.dispatch("skill", { action: "get", name: "nonexistent" });
-    const parsed = JSON.parse(result);
-    expect(parsed.error).toBeTruthy();
-  });
-
-  it("skill list returns seeded skills", async () => {
-    const result = await reg.dispatch("skill", { action: "list" });
-    const parsed = JSON.parse(result);
-    expect(parsed.length).toBeGreaterThanOrEqual(2);
-    const names = parsed.map((s: { name: string }) => s.name);
-    expect(names).toContain("battle");
-    expect(names).toContain("power_system");
-  });
-});
-
-describe("B-level Skill Gate Tools", () => {
-  it("skill save creates a new skill (gate approves)", async () => {
-    const result = await reg.dispatch("skill", {
-      action: "save",
-      name: "new_skill",
-      content: "test content",
-      description: "a test skill",
-    });
-    const parsed = JSON.parse(result);
-    expect(parsed.success).toBe(true);
-
-    const verify = await reg.dispatch("skill", { action: "get", name: "new_skill" });
-    const v = JSON.parse(verify);
-    expect(v.content).toBe("test content");
-  });
-
-  it("skill save with category", async () => {
-    const result = await reg.dispatch("skill", {
-      action: "save",
-      name: "xuanhuan_skill",
-      content: "玄幻内容",
-      description: "玄幻技能",
-      category: "玄幻",
-    });
-    const parsed = JSON.parse(result);
-    expect(parsed.success).toBe(true);
-
-    const list = await reg.dispatch("skill", { action: "list", category: "玄幻" });
-    const skills = JSON.parse(list);
-    expect(skills.some((s: { name: string }) => s.name === "xuanhuan_skill")).toBe(true);
-  });
-
-  it("skill delete removes a skill (gate approves)", async () => {
-    await reg.dispatch("skill", { action: "save", name: "to_delete", content: "bye" });
-    const result = await reg.dispatch("skill", { action: "delete", name: "to_delete" });
-    const parsed = JSON.parse(result);
-    expect(parsed.success).toBe(true);
-
-    const verify = await reg.dispatch("skill", { action: "get", name: "to_delete" });
-    const v = JSON.parse(verify);
-    expect(v.error).toBeTruthy();
-  });
-
-  it("skill save cancel returns cancelled true", async () => {
-    const g = new PauseGate();
-    g.on((req) => {
-      g.resolve(req.id, { type: "cancel" });
-    });
-    const r = createToolRegistry({ db: testDb.w, gate: g });
-
-    const result = await r.dispatch("skill", { action: "save", name: "cancelled_skill", content: "nope" });
-    const parsed = JSON.parse(result);
-    expect(parsed.cancelled).toBe(true);
-  });
-});
-
 describe("A-level Calc Tools", () => {
   it("calculate with damage formula returns correct result", async () => {
     const result = await reg.dispatch("calculate", {
@@ -209,20 +127,6 @@ describe("A-level Calc Tools", () => {
     const parsed = JSON.parse(result);
     expect(parsed.length).toBe(1);
     expect(parsed[0].result).toBeCloseTo(200, 5);
-  });
-});
-
-describe("A-level Validate Tools", () => {
-  it("validate_consistency with consistent data returns empty issues", async () => {
-    const result = await reg.dispatch("validate_consistency", {});
-    const parsed = JSON.parse(result);
-    expect(parsed.issues).toEqual([]);
-  });
-
-  it("validate_timeline returns result", async () => {
-    const result = await reg.dispatch("validate_timeline", {});
-    const parsed = JSON.parse(result);
-    expect(Array.isArray(parsed.issues)).toBe(true);
   });
 });
 
