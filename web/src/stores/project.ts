@@ -3,7 +3,7 @@ import { ref, computed } from "vue";
 import { api } from "../api/client.js";
 
 export const useProjectStore = defineStore("project", () => {
-  const projects = ref<Array<{ id: string; name: string; targetWords: number; createdAt: string }>>([]);
+  const projects = ref<Array<{ id: string; name: string; targetWords: number; wordCount: number; createdAt: string }>>([]);
   const currentId = ref<string | null>(null);
 
   const currentName = computed(() => {

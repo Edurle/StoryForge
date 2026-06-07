@@ -30,7 +30,7 @@
         <span>自动批准写入</span>
       </label>
       <button @click="layout.toggleLeft()">{{ layout.leftCollapsed ? "▶" : "◀" }} 知识库</button>
-      <button @click="layout.toggleRight()">{{ layout.rightCollapsed ? "◀" : "▶" }} 章节</button>
+      <button @click="layout.toggleRight()">{{ layout.rightCollapsed ? "◀" : "▶" }} 大纲/章节</button>
     </header>
     <div class="panels">
       <aside v-show="!layout.leftCollapsed" class="left-panel">
@@ -160,39 +160,99 @@
       </main>
       <aside v-show="!layout.rightCollapsed" class="right-panel">
         <div class="panel-header">
-          章节
-          <a v-if="chapters.length > 0" :href="api.getExportUrl(props.id)" :download="(projectStore.currentName || 'export') + '.txt'" class="panel-action-btn">导出 TXT</a>
+          <div class="right-tabs">
+            <div :class="['right-tab', { active: rightTab === 'outline' }]" @click="rightTab = 'outline'">大纲</div>
+            <div :class="['right-tab', { active: rightTab === 'chapter' }]" @click="rightTab = 'chapter'">章节</div>
+          </div>
+          <a v-if="rightTab === 'chapter' && chapters.length > 0" :href="api.getExportUrl(props.id)" :download="(projectStore.currentName || 'export') + '.txt'" class="panel-action-btn">导出 TXT</a>
         </div>
-        <div class="chapter-tree" v-if="chapters.length > 0">
-          <div v-for="vol in volumes" :key="vol" class="chapter-volume">
-            <div class="volume-header">第{{ vol }}卷</div>
-            <div v-for="ch in chaptersByVolume(vol)" :key="ch.id"
-              :class="['chapter-item', { active: selectedChapterId === ch.id }]"
-              @click="selectChapter(ch.id)">
-              <span class="chapter-title">{{ ch.title }}</span>
-              <span class="chapter-segments">{{ ch.segmentCount }}段 · {{ formatWords(ch.wordCount) }}</span>
+        <template v-if="rightTab === 'outline'">
+          <div v-if="outlines.length > 0" class="outline-tree">
+            <template v-for="node in outlineTree" :key="node.id">
+              <div class="outline-node outline-stage" @click="toggleOutline(node.id)">
+                <span class="outline-toggle">{{ expandedOutlines.has(node.id) ? '▼' : '▶' }}</span>
+                <span class="outline-title">{{ node.title }}</span>
+                <span v-if="node.target_words > 0" class="outline-milestone">{{ formatWords(node.target_words) }}</span>
+              </div>
+              <div v-if="node.target_words > 0" class="outline-progress-row">
+                <div class="outline-progress-bar">
+                  <div class="outline-progress-fill" :class="{ 'outline-reached': projectStats && projectStats.wordCount >= node.target_words }" :style="{ width: Math.min(projectStats ? projectStats.wordCount / node.target_words * 100 : 0, 100) + '%' }"></div>
+                </div>
+                <span class="outline-progress-text">{{ formatWords(projectStats?.wordCount ?? 0) }} / {{ formatWords(node.target_words) }}</span>
+                <span :class="projectStats && projectStats.wordCount >= node.target_words ? 'milestone-reached' : 'milestone-pending'">{{ projectStats && projectStats.wordCount >= node.target_words ? '达标' : '未达标' }}</span>
+              </div>
+              <div v-if="node.mood" class="outline-meta-line"><span class="outline-mood-tag">{{ node.mood }}</span></div>
+              <template v-if="expandedOutlines.has(node.id)">
+                <template v-for="unit in node.children" :key="unit.id">
+                  <div class="outline-node outline-unit" @click="toggleOutline(unit.id)">
+                    <span class="outline-toggle">{{ expandedOutlines.has(unit.id) ? '▼' : '▶' }}</span>
+                    <span class="outline-title">{{ unit.title }}</span>
+                    <span v-if="unit.chapter_start > 0" class="outline-chapter-range">{{ unit.chapter_start }}-{{ unit.chapter_end }}章</span>
+                    <span v-if="unit.mood" class="outline-mood-tag">{{ unit.mood }}</span>
+                  </div>
+                  <div v-if="unit.target_words > 0" class="outline-progress-row outline-unit-progress">
+                    <div class="outline-progress-bar">
+                      <div class="outline-progress-fill" :class="{ 'outline-reached': projectStats && projectStats.wordCount >= unit.target_words }" :style="{ width: Math.min(projectStats ? projectStats.wordCount / unit.target_words * 100 : 0, 100) + '%' }"></div>
+                    </div>
+                    <span class="outline-progress-text">{{ formatWords(projectStats?.wordCount ?? 0) }} / {{ formatWords(unit.target_words) }}</span>
+                  </div>
+                  <template v-if="expandedOutlines.has(unit.id)">
+                    <div v-for="ch in unit.children" :key="ch.id" class="outline-node outline-chapter-group">
+                      <span class="outline-bullet">●</span>
+                      <span v-if="ch.chapter_start > 0" class="outline-chapter-range">{{ ch.chapter_start }}-{{ ch.chapter_end }}章</span>
+                      <span class="outline-summary">{{ ch.summary || ch.title }}</span>
+                      <span v-if="ch.mood" class="outline-mood-tag">{{ ch.mood }}</span>
+                      <span v-if="outlineNodeWordCount(ch.id) > 0" class="outline-word-count">{{ formatWords(outlineNodeWordCount(ch.id)) }}字</span>
+                    </div>
+                    <template v-for="ch in unit.children" :key="'linked-' + ch.id">
+                      <template v-if="chaptersByOutlineId.get(ch.id)">
+                        <div v-for="lc in chaptersByOutlineId.get(ch.id)!" :key="'lc-' + lc.id" class="outline-linked-chapter" @click="selectChapter(lc.id); rightTab = 'chapter'">
+                          <span class="linked-chapter-icon">📝</span>
+                          <span class="linked-chapter-title">{{ lc.title }}</span>
+                          <span class="linked-chapter-words">{{ formatWords(lc.wordCount) }}字</span>
+                          <span :class="['linked-chapter-status', lc.status]">{{ lc.status }}</span>
+                        </div>
+                      </template>
+                    </template>
+                  </template>
+                </template>
+              </template>
+            </template>
+          </div>
+          <div v-else class="editor-placeholder">暂无大纲，通过对话让 AI 创建。</div>
+        </template>
+        <template v-else>
+          <div class="chapter-tree" v-if="chapters.length > 0">
+            <div v-for="vol in volumes" :key="vol" class="chapter-volume">
+              <div class="volume-header">第{{ vol }}卷</div>
+              <div v-for="ch in chaptersByVolume(vol)" :key="ch.id"
+                :class="['chapter-item', { active: selectedChapterId === ch.id }]"
+                @click="selectChapter(ch.id)">
+                <span class="chapter-title">{{ ch.title }}</span>
+                <span class="chapter-segments">{{ ch.segmentCount }}段 · {{ formatWords(ch.wordCount) }}</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div v-else class="editor-placeholder">暂无章节，通过对话让 AI 创建。</div>
-        <div v-if="selectedChapterId != null" class="chapter-content-area">
-          <div v-if="chapterLoading" class="editor-placeholder">加载中...</div>
-          <div v-else class="segment-list">
-            <draggable
-              v-model="chapterSegments"
-              item-key="id"
-              handle=".seg-handle"
-              @end="handleSegmentReorder"
-            >
-              <template #item="{ element }">
-                <div class="segment-item">
-                  <span class="seg-handle" title="拖拽排序">⋮⋮</span>
-                  <pre class="segment-text">{{ element.content }}</pre>
-                </div>
-              </template>
-            </draggable>
+          <div v-else class="editor-placeholder">暂无章节，通过对话让 AI 创建。</div>
+          <div v-if="selectedChapterId != null" class="chapter-content-area">
+            <div v-if="chapterLoading" class="editor-placeholder">加载中...</div>
+            <div v-else class="segment-list">
+              <draggable
+                v-model="chapterSegments"
+                item-key="id"
+                handle=".seg-handle"
+                @end="handleSegmentReorder"
+              >
+                <template #item="{ element }">
+                  <div class="segment-item">
+                    <span class="seg-handle" title="拖拽排序">⋮⋮</span>
+                    <pre class="segment-text">{{ element.content }}</pre>
+                  </div>
+                </template>
+              </draggable>
+            </div>
           </div>
-        </div>
+        </template>
       </aside>
     </div>
     <div v-if="gateRequest" class="gate-overlay">
@@ -249,9 +309,12 @@ const currentModel = ref("deepseek-v4-pro");
 const currentThinking = ref("enabled");
 const currentEffort = ref("high");
 const activeKbTab = ref("全部");
-const chapters = ref<Array<{ id: number; volume: number; title: string; status: string; segmentCount: number; wordCount: number }>>([]);
+  const chapters = ref<Array<{ id: number; volume: number; title: string; status: string; segmentCount: number; wordCount: number; outline_id: number | null }>>([]);
 const selectedChapterId = ref<number | null>(null);
 const projectStats = ref<{ wordCount: number; targetWords: number; progress: number; chapterCount: number } | null>(null);
+const rightTab = ref<"outline" | "chapter">("outline");
+const outlines = ref<Array<{ id: number; parent_id: number | null; volume: number; seq: number; title: string; summary: string; foreshadow: string; target_words: number; chapter_start: number; chapter_end: number; mood: string; metadata: string; status: string }>>([]);
+const expandedOutlines = ref<Set<number>>(new Set());
 const chapterContent = ref("");
 const chapterLoading = ref(false);
 const chatCtrl = ref<AbortController | null>(null);
@@ -325,10 +388,77 @@ async function loadStats() {
   } catch {}
 }
 
+async function loadOutlines() {
+  try {
+    outlines.value = await api.getOutlines(props.id);
+  } catch {}
+}
+
+const outlineVolumes = computed(() => [...new Set(outlines.value.map(o => o.volume))].sort((a, b) => a - b));
+
+interface OutlineTreeNode {
+  id: number;
+  title: string;
+  summary: string;
+  mood: string;
+  target_words: number;
+  chapter_start: number;
+  chapter_end: number;
+  metadata: string;
+  status: string;
+  children: OutlineTreeNode[];
+}
+
+const chaptersByOutlineId = computed(() => {
+  const m = new Map<number, Array<{ id: number; title: string; wordCount: number; status: string }>>();
+  for (const ch of chapters.value) {
+    if (ch.outline_id != null) {
+      if (!m.has(ch.outline_id)) m.set(ch.outline_id, []);
+      m.get(ch.outline_id)!.push({ id: ch.id, title: ch.title, wordCount: ch.wordCount, status: ch.status });
+    }
+  }
+  return m;
+});
+
+const outlineTree = computed(() => {
+  const map = new Map<number, OutlineTreeNode>();
+  const roots: OutlineTreeNode[] = [];
+  for (const o of outlines.value) {
+    map.set(o.id, { id: o.id, title: o.title, summary: o.summary, mood: o.mood, target_words: o.target_words, chapter_start: o.chapter_start, chapter_end: o.chapter_end, metadata: o.metadata, status: o.status, children: [] });
+  }
+  for (const o of outlines.value) {
+    const node = map.get(o.id)!;
+    if (o.parent_id != null && map.has(o.parent_id)) {
+      map.get(o.parent_id)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+});
+
+function toggleOutline(id: number) {
+  if (expandedOutlines.value.has(id)) {
+    expandedOutlines.value.delete(id);
+  } else {
+    expandedOutlines.value.add(id);
+  }
+}
+
+function parseOutlineMeta(raw: string): Record<string, string> {
+  try { return JSON.parse(raw) as Record<string, string>; } catch { return {}; }
+}
+
 function formatWords(n: number): string {
   if (n >= 10000) return (n / 10000).toFixed(1) + "万";
   if (n >= 1000) return (n / 1000).toFixed(1) + "k";
   return String(n);
+}
+
+function outlineNodeWordCount(outlineId: number): number {
+  const linked = chaptersByOutlineId.value.get(outlineId);
+  if (linked) return linked.reduce((s, c) => s + c.wordCount, 0);
+  return 0;
 }
 
 function formatTarget(n: number): string {
@@ -375,6 +505,7 @@ async function stopChat() {
   loadKnowledge();
   loadChapters();
   loadStats();
+  loadOutlines();
 }
 
 const autoApproveB = ref(true);
@@ -491,6 +622,7 @@ async function loadHistory() {
   loadSystemPrompt();
   loadUsage();
   loadStats();
+  loadOutlines();
   loadHistory();
    loadKnowledge();
    loadChapters();
@@ -1140,6 +1272,154 @@ header button:hover { background: #f3f4f6; color: #374151; }
   overflow-y: auto;
   border-top: 1px solid #f3f4f6;
 }
+.right-tabs {
+  display: flex;
+  gap: 0;
+}
+.right-tab {
+  padding: 0 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #9ca3af;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.right-tab:hover { color: #6b7280; }
+.right-tab.active { color: #6366f1; border-bottom-color: #6366f1; }
+.outline-tree {
+  overflow-y: auto;
+  flex: 1;
+}
+.outline-node {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-wrap: wrap;
+}
+.outline-node:hover { background: #f9fafb; }
+.outline-stage { font-weight: 600; background: #fafbfc; }
+.outline-unit { padding-left: 1.6rem; font-weight: 500; }
+.outline-chapter-group { padding-left: 2.8rem; cursor: default; }
+.outline-toggle {
+  font-size: 0.6rem;
+  color: #9ca3af;
+  width: 0.8rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+.outline-bullet {
+  font-size: 0.4rem;
+  color: #d1d5db;
+  flex-shrink: 0;
+}
+.outline-node .outline-title {
+  font-size: 0.78rem;
+  color: #374151;
+}
+.outline-stage .outline-title {
+  font-size: 0.82rem;
+}
+.outline-chapter-range {
+  font-size: 0.65rem;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+.outline-summary {
+  font-size: 0.72rem;
+  color: #6b7280;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.outline-milestone {
+  font-size: 0.68rem;
+  color: #6366f1;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: auto;
+}
+.outline-mood-tag {
+  font-size: 0.62rem;
+  color: #8b5cf6;
+  background: #f5f3ff;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.outline-meta-line {
+  padding: 0 0.8rem 0.3rem 1.6rem;
+}
+.outline-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.8rem 0.3rem 1.6rem;
+}
+.outline-unit-progress {
+  padding-left: 2.8rem;
+}
+.outline-progress-bar {
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+  flex: 1;
+}
+.outline-progress-fill {
+  height: 100%;
+  background: #f59e0b;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.outline-progress-fill.outline-reached {
+  background: #10b981;
+}
+.outline-progress-text {
+  font-size: 0.62rem;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+.milestone-reached {
+  font-size: 0.62rem;
+  color: #10b981;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.milestone-pending {
+  font-size: 0.62rem;
+  color: #f59e0b;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.outline-word-count {
+  font-size: 0.62rem;
+  color: #10b981;
+  font-weight: 500;
+  white-space: nowrap;
+  margin-left: 0.3rem;
+}
+.outline-linked-chapter {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem 0.25rem 3.6rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-wrap: wrap;
+}
+.outline-linked-chapter:hover { background: #f0fdf4; }
+.linked-chapter-icon { font-size: 0.7rem; flex-shrink: 0; }
+.linked-chapter-title { font-size: 0.72rem; color: #374151; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.linked-chapter-words { font-size: 0.62rem; color: #9ca3af; white-space: nowrap; }
+.linked-chapter-status { font-size: 0.58rem; padding: 0.1rem 0.3rem; border-radius: 3px; white-space: nowrap; }
+.linked-chapter-status.draft { color: #9ca3af; background: #f3f4f6; }
+.linked-chapter-status.writing { color: #f59e0b; background: #fffbeb; }
+.linked-chapter-status.done { color: #10b981; background: #ecfdf5; }
 .chapter-text {
   padding: 0.8rem;
   font-size: 0.88rem;

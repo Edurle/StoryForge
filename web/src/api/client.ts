@@ -2,11 +2,11 @@ const BASE = "/api/projects";
 const BACKEND = `${import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8888"}/api/projects`;
 
 export const api = {
-  async getProjects(): Promise<Array<{ id: string; name: string; targetWords: number; createdAt: string }>> {
+  async getProjects(): Promise<Array<{ id: string; name: string; targetWords: number; wordCount: number; createdAt: string }>> {
     const res = await fetch(`${BASE}`);
     return res.json();
   },
-  async createProject(name: string, targetWords?: number): Promise<{ id: string; name: string; targetWords: number; createdAt: string }> {
+  async createProject(name: string, targetWords?: number): Promise<{ id: string; name: string; targetWords: number; wordCount: number; createdAt: string }> {
     const res = await fetch(`${BASE}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -110,7 +110,7 @@ export const api = {
     return res.json();
   },
   async getChapters(projectId: string): Promise<Array<{
-    id: number; volume: number; title: string; status: string; segmentCount: number; wordCount: number;
+    id: number; volume: number; title: string; status: string; segmentCount: number; wordCount: number; outline_id: number | null;
   }>> {
     const res = await fetch(`${BACKEND}/${projectId}/chapters`);
     return res.json();
@@ -144,6 +144,12 @@ export const api = {
     chapters: Array<{ id: number; title: string; volume: number; wordCount: number; segmentCount: number }>;
   }> {
     const res = await fetch(`${BASE}/${projectId}/stats`);
+    return res.json();
+  },
+  async getOutlines(projectId: string): Promise<Array<{
+    id: number; parent_id: number | null; volume: number; seq: number; title: string; summary: string; foreshadow: string; target_words: number; chapter_start: number; chapter_end: number; mood: string; metadata: string; status: string;
+  }>> {
+    const res = await fetch(`${BACKEND}/${projectId}/outlines`);
     return res.json();
   },
   async getKnowledgeGraph(projectId: string): Promise<{

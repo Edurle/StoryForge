@@ -104,21 +104,23 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "chapter",
-    description: "章节管理。action: list（A级）列出章节，query（A级）查询单章节详情，create（B级）创建章节，edit（B级）编辑章节，delete（C级）删除章节及段落。",
+    description: "章节管理。action: list（A级）列出章节，query（A级）查询单章节详情，create（B级）创建章节，batch_create（B级）批量创建章节，edit（B级）编辑章节，delete（C级）删除章节及段落。outline_id 关联大纲节点，创建章节时指定可实现大纲→章节的映射。",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：list | query | create | edit | delete" },
+        action: { type: "string", description: "操作：list | query | create | batch_create | edit | delete" },
         id: { type: "number", description: "章节ID" },
         title: { type: "string", description: "标题" },
-        volume: { type: "number", description: "卷号（list 筛选）" },
+        volume: { type: "number", description: "卷号（list 筛选 / create用）" },
         status: { type: "string", description: "状态" },
+        outline_id: { type: "number", description: "关联的大纲节点ID（create/batch_create用）" },
+        titles: { type: "array", items: { type: "string" }, description: "批量创建时的章节标题数组（batch_create用）" },
       },
       required: ["action"],
     },
-    fn: async (args: { action: string; id?: number; title?: string; volume?: number; status?: string }) => {
+    fn: async (args: { action: string; id?: number; title?: string; volume?: number; status?: string; outline_id?: number; titles?: string[] }) => {
       if (args.action === "list") {
-        let sql = "SELECT id, volume, title, status FROM chapters";
+        let sql = "SELECT id, volume, title, status, outline_id FROM chapters";
         const params: unknown[] = [];
         if (args.volume != null) { sql += " WHERE volume = ?"; params.push(args.volume); }
         sql += " ORDER BY volume, id";
@@ -130,7 +132,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         if (args.id == null) return JSON.stringify({ error: "id required for query" });
         const res = await db.request({
           id: 0, type: "query",
-          sql: "SELECT id, volume, title, status FROM chapters WHERE id = ?",
+          sql: "SELECT id, volume, title, status, outline_id FROM chapters WHERE id = ?",
           params: [args.id],
         });
         if (!res.ok || !res.data) return JSON.stringify(null);
@@ -152,11 +154,29 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         await db.request({
           id: 0,
           type: "run",
-          sql: "INSERT INTO chapters (volume, title, status) VALUES (?, ?, ?)",
-          params: [args.volume ?? 1, title, args.status ?? "draft"],
+          sql: "INSERT INTO chapters (volume, title, status, outline_id) VALUES (?, ?, ?, ?)",
+          params: [args.volume ?? 1, title, args.status ?? "draft", args.outline_id ?? null],
         });
         const newId = await getLastInsertId(db);
         return JSON.stringify({ success: true, id: newId });
+      }
+      if (args.action === "batch_create") {
+        if (!args.titles || args.titles.length === 0) return JSON.stringify({ error: "titles array required for batch_create" });
+        const summary = `批量创建 ${args.titles.length} 个章节`;
+        const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
+        if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
+        const vol = args.volume ?? 1;
+        const oid = args.outline_id ?? null;
+        const ids: number[] = [];
+        for (const t of args.titles) {
+          await db.request({
+            id: 0, type: "run",
+            sql: "INSERT INTO chapters (volume, title, status, outline_id) VALUES (?, ?, 'draft', ?)",
+            params: [vol, t, oid],
+          });
+          ids.push(await getLastInsertId(db));
+        }
+        return JSON.stringify({ success: true, ids, count: ids.length });
       }
       if (args.action === "edit") {
         if (args.id == null) return JSON.stringify({ error: "id required for edit" });
@@ -168,6 +188,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         if (args.title != null) { sets.push("title = ?"); params.push(args.title); }
         if (args.status != null) { sets.push("status = ?"); params.push(args.status); }
         if (args.volume != null) { sets.push("volume = ?"); params.push(args.volume); }
+        if (args.outline_id != null) { sets.push("outline_id = ?"); params.push(args.outline_id); }
         if (sets.length === 0) return JSON.stringify({ success: true });
         sets.push("updated_at = datetime('now')");
         params.push(args.id);
@@ -273,7 +294,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
           params: [args.chapter_id, afterSeq + 1, args.content],
         });
         const newId = await getLastInsertId(db);
-        return JSON.stringify({ success: true, id: newId, seq: afterSeq + 1 });
+        return JSON.stringify({ success: true, id: newId });
       }
       if (args.action === "edit") {
         if (args.id == null) return JSON.stringify({ error: "id required for edit" });
@@ -382,25 +403,30 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
 
   reg.register({
     name: "outline",
-    description: "大纲管理。action: list（A级）列出大纲节点，query（A级）查询单节点详情，create（B级）创建节点，edit（B级）编辑节点，delete（C级）删除节点。",
+    description: `大纲管理（树形结构）。action: list（A级）列出大纲节点，query（A级）查询单节点详情，create（B级）创建节点，edit（B级）编辑节点，delete（C级）删除节点，search_foreshadow（A级）搜索指定章节范围内的伏笔回收提醒。层级：阶段层（parent_id=null，metadata存time_span/theme/protagonist_state）→ 单元层（parent_id=阶段ID，设chapter_start/end和mood）→ 章节组层（parent_id=单元ID，设chapter_start/end、summary写核心内容、mood写情绪）。target_words 设定字数里程碑。foreshadow 存 JSON 伏笔数组如 [{"type":"short","content":"...","recycle":"第X章"}]。`,
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", description: "操作：create | edit | delete" },
+        action: { type: "string", description: "操作：list | query | create | edit | delete" },
         id: { type: "number", description: "节点ID" },
-        parent_id: { type: "number", description: "父节点ID" },
+        parent_id: { type: "number", description: "父节点ID（阶段层=null，单元层=阶段ID，章节组=单元ID）" },
         volume: { type: "number", description: "卷号" },
         seq: { type: "number", description: "排序" },
         title: { type: "string", description: "标题" },
-        summary: { type: "string", description: "摘要" },
-        foreshadow: { type: "string", description: "伏笔" },
+        summary: { type: "string", description: "摘要/核心内容" },
+        foreshadow: { type: "string", description: "伏笔，JSON数组如 [{type,content,recycle}]" },
+        target_words: { type: "number", description: "字数里程碑——总字数达到此值后才触发此节点的关键剧情。0表示无约束" },
+        chapter_start: { type: "number", description: "起始章节号（0=无）" },
+        chapter_end: { type: "number", description: "结束章节号（0=无）" },
+        mood: { type: "string", description: "情绪标签，如'轻松喜剧'、'紧张→解气'、'感动'" },
+        metadata: { type: "string", description: "JSON格式的扩展数据，如 {time_span,theme,protagonist_state}" },
         status: { type: "string", description: "状态" },
       },
       required: ["action"],
     },
-    fn: async (args: { action: string; id?: number; parent_id?: number; volume?: number; seq?: number; title?: string; summary?: string; foreshadow?: string; status?: string }) => {
+    fn: async (args: { action: string; id?: number; parent_id?: number; volume?: number; seq?: number; title?: string; summary?: string; foreshadow?: string; target_words?: number; chapter_start?: number; chapter_end?: number; mood?: string; metadata?: string; status?: string }) => {
       if (args.action === "list") {
-        let sql = "SELECT id, parent_id, volume, seq, title, status FROM outlines";
+        let sql = "SELECT id, parent_id, volume, seq, title, status, target_words, chapter_start, chapter_end, mood FROM outlines";
         const params: unknown[] = [];
         if (args.volume != null) { sql += " WHERE volume = ?"; params.push(args.volume); }
         sql += " ORDER BY volume, seq, id";
@@ -412,7 +438,7 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         if (args.id == null) return JSON.stringify({ error: "id required for query" });
         const res = await db.request({
           id: 0, type: "query",
-          sql: "SELECT id, parent_id, volume, seq, title, summary, foreshadow, status FROM outlines WHERE id = ?",
+          sql: "SELECT id, parent_id, volume, seq, title, summary, foreshadow, target_words, chapter_start, chapter_end, mood, metadata, status FROM outlines WHERE id = ?",
           params: [args.id],
         });
         if (!res.ok || !res.data) return JSON.stringify(null);
@@ -428,8 +454,8 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         await db.request({
           id: 0,
           type: "run",
-          sql: "INSERT INTO outlines (parent_id, volume, seq, title, summary, foreshadow, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          params: [args.parent_id ?? null, args.volume ?? 1, args.seq ?? 0, title, args.summary ?? "", args.foreshadow ?? "", args.status ?? "draft"],
+          sql: "INSERT INTO outlines (parent_id, volume, seq, title, summary, foreshadow, target_words, chapter_start, chapter_end, mood, metadata, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          params: [args.parent_id ?? null, args.volume ?? 1, args.seq ?? 0, title, args.summary ?? "", args.foreshadow ?? "", args.target_words ?? 0, args.chapter_start ?? 0, args.chapter_end ?? 0, args.mood ?? "", args.metadata ?? "{}", args.status ?? "draft"],
         });
         const newId = await getLastInsertId(db);
         return JSON.stringify({ success: true, id: newId });
@@ -448,6 +474,58 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         if (args.parent_id != null) { sets.push("parent_id = ?"); params.push(args.parent_id); }
         if (args.volume != null) { sets.push("volume = ?"); params.push(args.volume); }
         if (args.seq != null) { sets.push("seq = ?"); params.push(args.seq); }
+        if (args.target_words != null) { sets.push("target_words = ?"); params.push(args.target_words); }
+        if (args.chapter_start != null) { sets.push("chapter_start = ?"); params.push(args.chapter_start); }
+        if (args.chapter_end != null) { sets.push("chapter_end = ?"); params.push(args.chapter_end); }
+        if (args.mood != null) { sets.push("mood = ?"); params.push(args.mood); }
+        if (args.metadata != null) { sets.push("metadata = ?"); params.push(args.metadata); }
+        if (sets.length === 0) return JSON.stringify({ success: true });
+        sets.push("updated_at = datetime('now')");
+        params.push(args.id);
+        await db.request({ id: 0, type: "run", sql: `UPDATE outlines SET ${sets.join(", ")} WHERE id = ?`, params });
+        return JSON.stringify({ success: true });
+      }
+      if (args.action === "query") {
+        if (args.id == null) return JSON.stringify({ error: "id required for query" });
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, parent_id, volume, seq, title, summary, foreshadow, target_words, status FROM outlines WHERE id = ?",
+          params: [args.id],
+        });
+        if (!res.ok || !res.data) return JSON.stringify(null);
+        const rows = res.data as Record<string, unknown>[];
+        if (!rows[0]) return JSON.stringify(null);
+        return JSON.stringify(rows[0]);
+      }
+      if (args.action === "create") {
+        const title = args.title ?? "";
+        const summary = `创建大纲 "${title}"`;
+        const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
+        if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
+        await db.request({
+          id: 0,
+          type: "run",
+          sql: "INSERT INTO outlines (parent_id, volume, seq, title, summary, foreshadow, target_words, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          params: [args.parent_id ?? null, args.volume ?? 1, args.seq ?? 0, title, args.summary ?? "", args.foreshadow ?? "", args.target_words ?? 0, args.status ?? "draft"],
+        });
+        const newId = await getLastInsertId(db);
+        return JSON.stringify({ success: true, id: newId });
+      }
+      if (args.action === "edit") {
+        if (args.id == null) return JSON.stringify({ error: "id required for edit" });
+        const summary = `编辑大纲 ${args.id}`;
+        const verdict = await gate.ask({ kind: "plan_proposed", payload: { plan: summary, summary } });
+        if (verdict.type === "cancel") return JSON.stringify({ cancelled: true });
+        const sets: string[] = [];
+        const params: unknown[] = [];
+        if (args.title != null) { sets.push("title = ?"); params.push(args.title); }
+        if (args.summary != null) { sets.push("summary = ?"); params.push(args.summary); }
+        if (args.foreshadow != null) { sets.push("foreshadow = ?"); params.push(args.foreshadow); }
+        if (args.status != null) { sets.push("status = ?"); params.push(args.status); }
+        if (args.parent_id != null) { sets.push("parent_id = ?"); params.push(args.parent_id); }
+        if (args.volume != null) { sets.push("volume = ?"); params.push(args.volume); }
+        if (args.seq != null) { sets.push("seq = ?"); params.push(args.seq); }
+        if (args.target_words != null) { sets.push("target_words = ?"); params.push(args.target_words); }
         if (sets.length === 0) return JSON.stringify({ success: true });
         sets.push("updated_at = datetime('now')");
         params.push(args.id);
@@ -461,6 +539,33 @@ export function registerWriteTools(reg: ToolRegistry, db: DbWorker, gate: PauseG
         if (verdict.type !== "continue") return JSON.stringify({ cancelled: true });
         await db.request({ id: 0, type: "run", sql: "DELETE FROM outlines WHERE id = ?", params: [args.id] });
         return JSON.stringify({ success: true });
+      }
+      if (args.action === "search_foreshadow") {
+        const aroundChapter = args.chapter_start ?? 0;
+        const res = await db.request({
+          id: 0, type: "query",
+          sql: "SELECT id, title, foreshadow FROM outlines WHERE foreshadow != '' AND foreshadow != '[]' ORDER BY volume, seq, id",
+        });
+        if (!res.ok || !res.data) return JSON.stringify([]);
+        const rows = res.data as { id: number; title: string; foreshadow: string }[];
+        const results: { outline_id: number; outline_title: string; foreshadow: Record<string, string> }[] = [];
+        const range = args.chapter_end ?? aroundChapter;
+        for (const row of rows) {
+          try {
+            const items = JSON.parse(row.foreshadow) as Record<string, string>[];
+            for (const f of items) {
+              const recycle = f.recycle ? parseInt(String(f.recycle).replace(/[^0-9]/g, ""), 10) : 0;
+              if (aroundChapter > 0 && recycle > 0) {
+                if (recycle >= aroundChapter && recycle <= range) {
+                  results.push({ outline_id: row.id, outline_title: row.title, foreshadow: f });
+                }
+              } else {
+                results.push({ outline_id: row.id, outline_title: row.title, foreshadow: f });
+              }
+            }
+          } catch {}
+        }
+        return JSON.stringify(results);
       }
       return JSON.stringify({ error: `unknown action: ${args.action}` });
     },

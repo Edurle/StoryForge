@@ -219,20 +219,21 @@ export interface ChapterSummary {
   status: string;
   segmentCount: number;
   wordCount: number;
+  outlineId: number | null;
 }
 
 export async function queryChapters(w: DbWorker): Promise<ChapterSummary[]> {
   const res = await w.request({
     id: 0,
     type: "query",
-    sql: `SELECT c.id, c.volume, c.title, c.status,
+    sql: `SELECT c.id, c.volume, c.title, c.status, c.outline_id,
       COUNT(s.id) AS segment_count,
       COALESCE(SUM(LENGTH(s.content) - LENGTH(REPLACE(s.content, ' ', '')) + LENGTH(s.content) - LENGTH(REPLACE(s.content, CHAR(10), ''))), 0) AS word_count
       FROM chapters c LEFT JOIN segments s ON s.chapter_id = c.id
       GROUP BY c.id ORDER BY c.volume, c.id`,
   });
   if (!res.ok || !res.data) return [];
-  const rows = res.data as { id: number; volume: number; title: string; status: string; segment_count: number; word_count: number }[];
+  const rows = res.data as { id: number; volume: number; title: string; status: string; segment_count: number; word_count: number; outline_id: number | null }[];
   return rows.map(row => ({
     id: row.id,
     volume: row.volume,
@@ -240,6 +241,7 @@ export async function queryChapters(w: DbWorker): Promise<ChapterSummary[]> {
     status: row.status,
     segmentCount: row.segment_count,
     wordCount: row.word_count,
+    outlineId: row.outline_id,
   }));
 }
 
@@ -271,6 +273,44 @@ export async function queryChapterContent(w: DbWorker, chapterId: number): Promi
   if (!res.ok || !res.data) return "";
   const rows = res.data as { content: string }[];
   return rows.map(row => row.content).join("\n\n");
+}
+
+export interface OutlineRow {
+  id: number;
+  parent_id: number | null;
+  volume: number;
+  seq: number;
+  title: string;
+  summary: string;
+  foreshadow: string;
+  target_words: number;
+  chapter_start: number;
+  chapter_end: number;
+  mood: string;
+  metadata: string;
+  status: string;
+}
+
+export async function queryOutlines(w: DbWorker): Promise<OutlineRow[]> {
+  const res = await w.request({
+    id: 0,
+    type: "query",
+    sql: "SELECT id, parent_id, volume, seq, title, summary, foreshadow, target_words, chapter_start, chapter_end, mood, metadata, status FROM outlines ORDER BY volume, seq, id",
+  });
+  if (!res.ok || !res.data) return [];
+  return res.data as OutlineRow[];
+}
+
+export async function queryOutlineById(w: DbWorker, id: number): Promise<OutlineRow | null> {
+  const res = await w.request({
+    id: 0,
+    type: "query",
+    sql: "SELECT id, parent_id, volume, seq, title, summary, foreshadow, target_words, chapter_start, chapter_end, mood, metadata, status FROM outlines WHERE id = ?",
+    params: [id],
+  });
+  if (!res.ok || !res.data) return null;
+  const rows = res.data as OutlineRow[];
+  return rows[0] ?? null;
 }
 
 export interface KgNodeRow {

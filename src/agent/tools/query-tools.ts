@@ -33,7 +33,36 @@ export function registerQueryTools(reg: ToolRegistry, db: DbWorker): void {
       }
       const wordCount = await computeWordCount(db);
       counts["total_word_count"] = wordCount;
-      return JSON.stringify(counts);
+
+      const result: Record<string, unknown> = { ...counts };
+
+      const mileRes = await db.request({
+        id: 0,
+        type: "query",
+        sql: "SELECT id, title, target_words, status FROM outlines WHERE target_words > 0 ORDER BY target_words ASC",
+      });
+      if (mileRes.ok && mileRes.data) {
+        result["milestones"] = (mileRes.data as { id: number; title: string; target_words: number; status: string }[]).map(m => ({
+          id: m.id,
+          title: m.title,
+          targetWords: m.target_words,
+          status: m.status,
+          reached: wordCount >= m.target_words,
+        }));
+      }
+
+      const posRes = await db.request({
+        id: 0, type: "query",
+        sql: "SELECT value FROM global_constants WHERE key = 'current_position'",
+      });
+      if (posRes.ok && posRes.data) {
+        const rows = posRes.data as { value: string }[];
+        if (rows[0]) {
+          try { result["current_position"] = JSON.parse(rows[0].value); } catch {}
+        }
+      }
+
+      return JSON.stringify(result);
     },
   });
 }

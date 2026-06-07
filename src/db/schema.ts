@@ -6,6 +6,17 @@ export function migrate(db: Database.Database): void {
   if (!cols.some(c => c.name === "tag")) {
     db.exec("ALTER TABLE global_constants ADD COLUMN tag TEXT NOT NULL DEFAULT ''");
   }
+  const outlineCols = db.prepare("PRAGMA table_info(outlines)").all() as Array<{ name: string }>;
+  if (!outlineCols.some(c => c.name === "chapter_start")) {
+    db.exec("ALTER TABLE outlines ADD COLUMN chapter_start INTEGER NOT NULL DEFAULT 0");
+    db.exec("ALTER TABLE outlines ADD COLUMN chapter_end INTEGER NOT NULL DEFAULT 0");
+    db.exec("ALTER TABLE outlines ADD COLUMN mood TEXT NOT NULL DEFAULT ''");
+    db.exec("ALTER TABLE outlines ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'");
+  }
+  const chapterCols = db.prepare("PRAGMA table_info(chapters)").all() as Array<{ name: string }>;
+  if (!chapterCols.some(c => c.name === "outline_id")) {
+    db.exec("ALTER TABLE chapters ADD COLUMN outline_id INTEGER REFERENCES outlines(id)");
+  }
 }
 
 const SCHEMA = `
@@ -57,6 +68,7 @@ CREATE TABLE IF NOT EXISTS chapters (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   volume      INTEGER NOT NULL DEFAULT 1,
   title       TEXT    NOT NULL,
+  outline_id  INTEGER REFERENCES outlines(id),
   status      TEXT    NOT NULL DEFAULT 'draft',
   created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -122,16 +134,21 @@ CREATE TABLE IF NOT EXISTS timeline_events (
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS outlines (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  parent_id   INTEGER REFERENCES outlines(id),
-  volume      INTEGER NOT NULL DEFAULT 1,
-  seq         INTEGER NOT NULL DEFAULT 0,
-  title       TEXT    NOT NULL,
-  summary     TEXT    NOT NULL DEFAULT '',
-  foreshadow  TEXT    NOT NULL DEFAULT '',
-  status      TEXT    NOT NULL DEFAULT 'draft',
-  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-  updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_id     INTEGER REFERENCES outlines(id),
+  volume        INTEGER NOT NULL DEFAULT 1,
+  seq           INTEGER NOT NULL DEFAULT 0,
+  title         TEXT    NOT NULL,
+  summary       TEXT    NOT NULL DEFAULT '',
+  foreshadow    TEXT    NOT NULL DEFAULT '',
+  target_words  INTEGER NOT NULL DEFAULT 0,
+  chapter_start INTEGER NOT NULL DEFAULT 0,
+  chapter_end   INTEGER NOT NULL DEFAULT 0,
+  mood          TEXT    NOT NULL DEFAULT '',
+  metadata      TEXT    NOT NULL DEFAULT '{}',
+  status        TEXT    NOT NULL DEFAULT 'draft',
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ============================================================

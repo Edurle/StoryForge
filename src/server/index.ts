@@ -12,7 +12,7 @@ import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { getUsageSummary, getCompressUsageSummary } from "../services/usage.js";
 import { recordUsage } from "../services/usage.js";
 import { loadHistory, saveMessages, saveSnapshot, cleanOldSnapshots, getNextSeq, touchSession } from "../services/history.js";
-import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations, queryChapters, queryChapterContent, queryChapterSegments, reorderSegments, queryKgGraph } from "../services/knowledge.js";
+import { queryCharacters, queryAllSettings, queryFormulas, queryAllTimeline, queryItems, queryFactions, queryLocations, queryChapters, queryChapterContent, queryChapterSegments, reorderSegments, queryKgGraph, queryOutlines, queryOutlineById } from "../services/knowledge.js";
 import { computeWordCount } from "../agent/tools/query-tools.js";
 
 export interface ServerDeps {
@@ -301,6 +301,7 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
       status: ch.status,
       segmentCount: ch.segmentCount,
       wordCount: ch.wordCount,
+      outline_id: ch.outlineId,
     })));
   });
 
@@ -330,6 +331,22 @@ export async function createApp(deps: ServerDeps): Promise<express.Express> {
     const db = deps.getDbWorker(projectId);
     await reorderSegments(db, chapterId, segmentIds as number[]);
     res.json({ ok: true });
+  });
+
+  app.get("/api/projects/:projectId/outlines", async (_req, res) => {
+    const projectId = (_req.params as Record<string, string | undefined>).projectId!;
+    const db = deps.getDbWorker(projectId);
+    res.json(await queryOutlines(db));
+  });
+
+  app.get("/api/projects/:projectId/outlines/:outlineId", async (req, res) => {
+    const projectId = (req.params as Record<string, string | undefined>).projectId!;
+    const outlineId = parseInt((req.params as Record<string, string | undefined>).outlineId!, 10);
+    if (isNaN(outlineId)) { res.status(400).json({ error: "invalid outlineId" }); return; }
+    const db = deps.getDbWorker(projectId);
+    const outline = await queryOutlineById(db, outlineId);
+    if (!outline) { res.status(404).json({ error: "Outline not found" }); return; }
+    res.json(outline);
   });
 
   app.get("/api/projects/:projectId/export", async (_req, res) => {
